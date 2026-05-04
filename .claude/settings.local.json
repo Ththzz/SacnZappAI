@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__ide__getDiagnostics",
+      "Bash(npm run *)",
+      "Bash(xxd \"D:/nutriscan/app/layout.tsx\")",
+      "Bash(npx next *)",
+      "Bash(taskkill //F //IM node.exe)"
+    ]
+  }
+}

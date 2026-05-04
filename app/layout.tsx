@@ -1,15 +1,15 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import Sidebar from "@/components/ui/Sidebar/Sidebar";
+import { Noto_Sans_Thai } from "next/font/google";
+import Header from "@/components/ui/Header/Header";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
+const fontThai = Noto_Sans_Thai({
+  subsets: ["thai"],
+  weight: ["300", "400", "500", "600", "700"],
+  variable: "--font-sans",
+  display: "swap",
 });
 
 export const metadata: Metadata = {
@@ -24,10 +24,12 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
-      >
-        {children}
+      <body className={`${fontThai.variable} font-sans antialiased flex items-start justify-between bg-[#F7F7F7]`}>
+        <Sidebar />
+        <main className="grid w-full h-full pl-[300px] ">
+          <Header />
+          {children}
+        </main>
       </body>
     </html>
   );
