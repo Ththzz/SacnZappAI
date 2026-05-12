@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import {
   Beef,
   Bot,
@@ -10,6 +10,7 @@ import {
   Lightbulb,
   Save,
 } from "lucide-react"
+import { readMealEntries } from "@/lib/user-data"
 
 type TrendStatus = "good" | "over"
 
@@ -39,7 +40,7 @@ const calorieGoal = 1800
 const chartMaxCalories = 2200
 const chartHeight = 150
 
-const calorieTrend: CalorieTrendPoint[] = [
+const defaultCalorieTrend: CalorieTrendPoint[] = [
   { day: "จ", calories: 1520, status: "good" },
   { day: "อ", calories: 1680, status: "good" },
   { day: "พ", calories: 1600, status: "good" },
@@ -49,7 +50,7 @@ const calorieTrend: CalorieTrendPoint[] = [
   { day: "อา", calories: 1280, status: "good" },
 ]
 
-const foodAlerts: FoodAlert[] = [
+const defaultFoodAlerts: FoodAlert[] = [
   {
     id: "protein",
     icon: Beef,
@@ -82,9 +83,47 @@ const macroBalance = [
 
 export default function HealthInsightClient() {
   const [savedMealIds, setSavedMealIds] = useState<string[]>([])
+  const [calorieTrend, setCalorieTrend] = useState<CalorieTrendPoint[]>(defaultCalorieTrend)
+  const [foodAlerts, setFoodAlerts] = useState<FoodAlert[]>(defaultFoodAlerts)
 
   const savedCount = savedMealIds.length
   const targetLineBottom = useMemo(() => (calorieGoal / chartMaxCalories) * chartHeight, [])
+
+  useEffect(() => {
+    const meals = readMealEntries()
+    if (meals.length === 0) return
+
+    const byDate = new Map<string, number>()
+    meals.forEach((meal) => {
+      byDate.set(meal.date, (byDate.get(meal.date) ?? 0) + meal.calories)
+    })
+
+    const sorted = [...byDate.entries()].sort((a, b) => a[0].localeCompare(b[0])).slice(-7)
+    const dayLabels = ["อา", "จ", "อ", "พ", "พฤ", "ศ", "ส"]
+    const trend = sorted.map(([date, calories]) => {
+      const day = new Date(`${date}T00:00:00`).getDay()
+      return {
+        day: dayLabels[day],
+        calories,
+        status: calories > calorieGoal ? "over" as const : "good" as const,
+      }
+    })
+    if (trend.length > 0) setCalorieTrend(trend)
+
+    const totalProtein = meals.reduce((sum, meal) => sum + meal.protein, 0)
+    const avgProtein = totalProtein / meals.length
+    setFoodAlerts([
+      {
+        id: "protein",
+        icon: Beef,
+        title: "โปรตีน",
+        description: avgProtein < 20 ? "ต่ำกว่าเป้าหมายเฉลี่ยต่อมื้อ ลองเพิ่มไข่หรือปลา" : "โปรตีนอยู่ในเกณฑ์ดี รักษาความสม่ำเสมอ",
+        colorClass: "bg-rose-50",
+        iconClass: avgProtein < 20 ? "text-red-500" : "text-emerald-500",
+      },
+      ...defaultFoodAlerts.filter((item) => item.id !== "protein"),
+    ])
+  }, [])
 
   const handleSaveMeal = (mealId: string) => {
     setSavedMealIds((current) =>
@@ -101,11 +140,11 @@ export default function HealthInsightClient() {
 
       <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
         <main className="space-y-5">
-          <CalorieTrendCard targetLineBottom={targetLineBottom} />
+          <CalorieTrendCard targetLineBottom={targetLineBottom} calorieTrend={calorieTrend} />
           <MealSuggestionsCard savedMealIds={savedMealIds} onSaveMeal={handleSaveMeal} />
         </main>
 
-        <FoodAlertsPanel />
+        <FoodAlertsPanel foodAlerts={foodAlerts} />
       </div>
     </div>
   )
@@ -142,7 +181,7 @@ function InsightBanner({ savedCount }: { savedCount: number }) {
   )
 }
 
-function CalorieTrendCard({ targetLineBottom }: { targetLineBottom: number }) {
+function CalorieTrendCard({ targetLineBottom, calorieTrend }: { targetLineBottom: number; calorieTrend: CalorieTrendPoint[] }) {
   return (
     <section className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-black/5">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -180,7 +219,7 @@ function CalorieTrendCard({ targetLineBottom }: { targetLineBottom: number }) {
   )
 }
 
-function FoodAlertsPanel() {
+function FoodAlertsPanel({ foodAlerts }: { foodAlerts: FoodAlert[] }) {
   return (
     <aside className="space-y-4">
       <h2 className="text-base font-extrabold">แจ้งเตือนสารอาหาร</h2>

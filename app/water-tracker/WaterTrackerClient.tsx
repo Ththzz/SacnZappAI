@@ -1,8 +1,9 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { CheckCircle2, Droplet, Droplets, Minus, Plus, Target, Trash2, Waves } from 'lucide-react'
+import { readWaterLogs, writeWaterLogs } from '@/lib/user-data'
 
 const drinkOptions = [150, 250, 350, 500]
 const targetMl = 2000
@@ -31,6 +32,17 @@ const chartHeight = 130
 export default function WaterTrackerClient() {
   const [logs, setLogs] = useState(initialLogs)
   const [selectedAmount, setSelectedAmount] = useState(250)
+
+  useEffect(() => {
+    const stored = readWaterLogs()
+    if (stored.length > 0) {
+      setLogs(stored)
+    }
+  }, [])
+
+  useEffect(() => {
+    writeWaterLogs(logs)
+  }, [logs])
 
   const totalMl = logs.reduce((sum, item) => sum + item.amount, 0)
   const cups = Math.round(totalMl / 250)

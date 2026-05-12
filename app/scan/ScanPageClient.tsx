@@ -14,6 +14,7 @@ import {
   XIcon,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { addMealEntry } from '@/lib/user-data'
 
 type ScanResult = {
   name: string
@@ -89,6 +90,7 @@ export default function ScanPageClient() {
   const [result, setResult] = useState<ScanResult | null>(null)
   const [preview, setPreview] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [saved, setSaved] = useState(false)
 
   const hasResult = Boolean(result)
   const isProcessing = scanning && Boolean(preview) && !hasResult
@@ -113,6 +115,7 @@ export default function ScanPageClient() {
     setError(null)
     setResult(null)
     setPreview(image)
+    setSaved(false)
     setScanning(true)
 
     try {
@@ -237,6 +240,25 @@ export default function ScanPageClient() {
     const image = canvas.toDataURL('image/jpeg', 0.9)
     stopCamera()
     await analyzeDataUrl(image)
+  }
+
+  const saveScanResult = () => {
+    if (!result) return
+    const now = new Date()
+    addMealEntry({
+      id: `scan-${now.getTime()}`,
+      name: result.name,
+      calories: result.calories,
+      protein: result.protein,
+      carbs: result.carbs,
+      fat: result.fat,
+      confidence: result.confidence,
+      note: result.note,
+      time: now.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', hour12: false }),
+      date: now.toISOString().slice(0, 10),
+      source: 'scan',
+    })
+    setSaved(true)
   }
 
   return (
@@ -421,9 +443,9 @@ export default function ScanPageClient() {
               {result.note && <p className="mt-5 rounded-2xl bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{result.note}</p>}
 
               <div className="mt-7 grid gap-3 sm:grid-cols-2">
-                <Button className="h-11 rounded-full bg-emerald-600 text-white hover:bg-emerald-700">
+                <Button className="h-11 rounded-full bg-emerald-600 text-white hover:bg-emerald-700" onClick={saveScanResult}>
                   <SaveIcon className="size-4" />
-                  บันทึกข้อมูล
+                  {saved ? 'บันทึกแล้ว' : 'บันทึกข้อมูล'}
                 </Button>
                 <Button variant="outline" className="h-11 rounded-full border-emerald-100 text-emerald-700 hover:bg-emerald-50">
                   ดูรายละเอียด

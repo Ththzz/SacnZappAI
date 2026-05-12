@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import {
   AlertTriangle,
   ArrowLeft,
@@ -16,6 +16,7 @@ import {
   Utensils,
   X,
 } from "lucide-react"
+import { readMealEntries } from "@/lib/user-data"
 
 type ViewMode = "day" | "week" | "month"
 type DayMeal = {
@@ -25,6 +26,12 @@ type DayMeal = {
   time: string
   calories: number
   tone: string
+  protein?: number
+  carbs?: number
+  fat?: number
+  source?: string
+  confidence?: number
+  note?: string
 }
 
 const mealDetailsById: Record<number, {
@@ -120,7 +127,35 @@ const monthSummary = [
 export default function MealHistoryClient() {
   const [activeView, setActiveView] = useState<ViewMode>("day")
   const [selectedMeal, setSelectedMeal] = useState<DayMeal | null>(null)
-  const dailyCalories = dayMeals.reduce((total, meal) => total + meal.calories, 0)
+  const [historyMeals, setHistoryMeals] = useState<DayMeal[]>(dayMeals)
+
+  useEffect(() => {
+    const stored = readMealEntries()
+    if (stored.length === 0) return
+
+    const converted: DayMeal[] = stored.slice(0, 20).map((item, index) => ({
+      id: Number(item.id.replace(/\D/g, "").slice(-6) || `${1000 + index}`),
+      icon: "🍽️",
+      name: item.name,
+      time: item.time,
+      calories: item.calories,
+      tone: item.calories > 420 ? "warn" : "good",
+      protein: item.protein,
+      carbs: item.carbs,
+      fat: item.fat,
+      source: item.source,
+      confidence: item.confidence,
+      note: item.note,
+    }))
+
+    setHistoryMeals((current) => {
+      const merged = [...converted, ...current]
+      const deduped = merged.filter((meal, idx) => merged.findIndex((item) => item.name === meal.name && item.time === meal.time) === idx)
+      return deduped.slice(0, 24)
+    })
+  }, [])
+
+  const dailyCalories = historyMeals.reduce((total, meal) => total + meal.calories, 0)
   const weeklyCalories = weekDays.reduce((total, day) => total + day.calories, 0)
   const averageCalories = Math.round(weeklyCalories / weekDays.length)
 
@@ -140,7 +175,7 @@ export default function MealHistoryClient() {
 
       <ViewTabs activeView={activeView} onChange={setActiveView} />
 
-      {activeView === "day" && <DailyView dailyCalories={dailyCalories} onSelectMeal={setSelectedMeal} />}
+      {activeView === "day" && <DailyView meals={historyMeals} dailyCalories={dailyCalories} onSelectMeal={setSelectedMeal} />}
       {activeView === "week" && <WeeklyView averageCalories={averageCalories} />}
       {activeView === "month" && <MonthlyView />}
 
@@ -174,7 +209,7 @@ function ViewTabs({ activeView, onChange }: { activeView: ViewMode; onChange: (v
   )
 }
 
-function DailyView({ dailyCalories, onSelectMeal }: { dailyCalories: number; onSelectMeal: (meal: DayMeal) => void }) {
+function DailyView({ meals, dailyCalories, onSelectMeal }: { meals: DayMeal[]; dailyCalories: number; onSelectMeal: (meal: DayMeal) => void }) {
   const percent = Math.round((dailyCalories / 1800) * 100)
 
   return (
@@ -185,7 +220,7 @@ function DailyView({ dailyCalories, onSelectMeal }: { dailyCalories: number; onS
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h2 className="text-base font-extrabold">18 เมษายน 2026</h2>
-                <p className="text-sm text-neutral-500">รวม {dailyCalories.toLocaleString()} kcal จาก 4 มื้อ</p>
+                <p className="text-sm text-neutral-500">รวม {dailyCalories.toLocaleString()} kcal จาก {meals.length} มื้อ</p>
               </div>
               <span className="text-sm font-extrabold text-[#2EC78F]">{percent}%</span>
             </div>
@@ -203,7 +238,7 @@ function DailyView({ dailyCalories, onSelectMeal }: { dailyCalories: number; onS
         <section>
           <h2 className="text-base font-extrabold">มื้ออาหารวันนี้</h2>
           <div className="mt-3 space-y-3">
-            {dayMeals.map((meal) => (
+            {meals.map((meal) => (
               <article
                 key={meal.id}
                 role="button"
@@ -407,7 +442,16 @@ function MonthlyView() {
 }
 
 function MealDetailModal({ meal, onClose }: { meal: DayMeal; onClose: () => void }) {
-  const detail = mealDetailsById[meal.id]
+  const detail = mealDetailsById[meal.id] ?? {
+    protein: meal.protein ?? 0,
+    carbs: meal.carbs ?? 0,
+    fat: meal.fat ?? 0,
+    portion: "1 จาน",
+    source: meal.source === "scan" ? "สแกนจากภาพ" : "บันทึกด้วยมือ",
+    confidence: meal.confidence ?? 75,
+    ingredients: ["ไม่ระบุส่วนประกอบ"],
+    note: meal.note ?? "ยังไม่มีคำแนะนำเพิ่มเติมสำหรับมื้อนี้",
+  }
   const macros = [
     { label: "โปรตีน", value: detail.protein, unit: "g", color: "bg-emerald-400" },
     { label: "คาร์บ", value: detail.carbs, unit: "g", color: "bg-blue-500" },
