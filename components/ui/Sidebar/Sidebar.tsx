@@ -1,7 +1,7 @@
 'use client'
 
 import Link from "next/link"
-import { usePathname } from "next/navigation"
+import { usePathname, useRouter } from "next/navigation"
 import Useritem from "../Useritem/Useritem"
 import {
   LayoutDashboard,
@@ -13,6 +13,7 @@ import {
   Settings,
   CameraIcon,
   Menu,
+  Sprout,
 } from "lucide-react"
 import { useSidebar } from "@/context/SidebarContext"
 
@@ -29,37 +30,44 @@ const menuList = [
 
 const Sidebar = () => {
   const pathname = usePathname()
+  const router = useRouter()
   const { isSidebarOpen, setIsSidebarOpen } = useSidebar()
 
   return (
-    <div className={`fixed flex flex-col min-h-screen border-r z-40 bg-white transition-all duration-300 ${
-      isSidebarOpen ? "w-[280px]" : "w-[80px]"
+    <div className={`fixed left-0 top-0 z-40 flex flex-col transition-none md:min-h-screen md:border-r md:bg-white md:transition-[width] md:duration-150 ${
+      isSidebarOpen
+        ? "min-h-screen w-[280px] border-r bg-white"
+        : "h-16 w-16 overflow-hidden md:h-auto md:w-[80px] md:overflow-visible"
     }`}>
-      {/* Header */}
-      <div className="h-16 bg-[#2EC78F] flex items-center px-4 font-semibold text-lg text-white">
+      <div className={`h-16 flex items-center font-semibold text-lg text-white md:bg-[#2EC78F] ${
+        isSidebarOpen ? "bg-[#2EC78F] px-4" : "justify-center bg-transparent px-0 md:justify-start md:px-4"
+      }`}>
         <button
           onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-          className="p-2 rounded-full hover:bg-[#05b474] transition-colors max-w-fit cursor-pointer shrink-0"
+          className={`max-w-fit shrink-0 cursor-pointer rounded-full p-2 transition-none hover:bg-[#2EC78F]/10 md:transition-colors md:duration-150 md:hover:bg-[#05b474] ${
+            isSidebarOpen ? "" : "md:bg-transparent"
+          }`}
           aria-label={isSidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'}
         >
           <Menu
             size={24}
-            className={`transition-colors duration-300 ${
-              !isSidebarOpen ? 'text-green-200' : 'text-white'
+            className={`transition-none md:transition-colors md:duration-150 ${
+              !isSidebarOpen ? 'text-[#2EC78F] md:text-green-200' : 'text-white'
             }`}
           />
         </button>
 
-        <span className={`transition-all duration-300 whitespace-nowrap overflow-hidden ${
+        <span className={`flex items-center gap-2 whitespace-nowrap overflow-hidden transition-none md:transition-[opacity,width,margin] md:duration-150 ${
           isSidebarOpen ? "opacity-100 w-auto ml-2" : "opacity-0 w-0 ml-0"
         }`}>
-          🌿 ScanZapp AI
+          <Sprout className="h-5 w-5 shrink-0 text-emerald-100" />
+          ScanZapp AI
         </span>
       </div>
 
-      {/* Content */}
-      <div className="flex flex-col flex-1 p-4 justify-between bg-white overflow-hidden">
-        {/* Menu */}
+      <div className={`flex-1 flex-col justify-between bg-white p-4 overflow-hidden ${
+        isSidebarOpen ? "flex" : "hidden md:flex"
+      }`}>
         <div className="flex flex-col gap-2">
           {menuList.map((item) => {
             const Icon = item.icon
@@ -69,15 +77,16 @@ const Sidebar = () => {
               <Link
                 key={item.link}
                 href={item.link}
-                className={`flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-all duration-300 ${
+                prefetch
+                aria-current={pathname === item.link ? 'page' : undefined}
+                onFocus={() => router.prefetch(item.link)}
+                onMouseEnter={() => router.prefetch(item.link)}
+                className={`flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors duration-100 ${
                   active ? 'bg-[#2EC78F]/10 text-[#2EC78F]' : 'hover:bg-gray-100'
                 }`}
               >
-                {/* Icon อยู่นิ่งเสมอ ไม่ขยับ */}
                 <Icon className="h-4 w-4 shrink-0" />
-
-                {/* Text หดด้วย w-0 + opacity แทนการเปลี่ยน justify */}
-                <span className={`transition-all duration-300 whitespace-nowrap overflow-hidden ${
+                <span className={`whitespace-nowrap overflow-hidden transition-none md:transition-[opacity,width] md:duration-150 ${
                   isSidebarOpen ? "opacity-100 w-auto" : "opacity-0 w-0"
                 }`}>
                   {item.text}
@@ -87,7 +96,6 @@ const Sidebar = () => {
           })}
         </div>
 
-        {/* Bottom */}
         <div className="space-y-3 pt-4 border-t">
           <Useritem isSidebarOpen={isSidebarOpen} />
         </div>

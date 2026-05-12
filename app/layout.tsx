@@ -1,6 +1,12 @@
 import type { Metadata } from "next";
+import { Noto_Sans_Thai } from "next/font/google";
 import "./globals.css";
 import LayoutClient from "./layout-client";
+
+const notoSansThai = Noto_Sans_Thai({
+  subsets: ["thai", "latin"],
+  variable: "--font-noto-sans-thai",
+});
 
 export const metadata: Metadata = {
   title: "Create Next App",
@@ -9,7 +15,7 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="th">
+    <html lang="th" className={notoSansThai.variable}>
       <body className="font-sans antialiased bg-[#F7F7F7]">
         <LayoutClient>{children}</LayoutClient>
       </body>
