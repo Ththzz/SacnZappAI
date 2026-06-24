@@ -1,35 +1,12 @@
 'use client'
 
-import { Droplets, Flame, Plus, Sun, Target } from "lucide-react"
-
+import { useEffect, useMemo, useState } from "react"
+import { Droplets, Plus, Sun, Target, Utensils } from "lucide-react"
 import { Card, CardContent } from "@/components/ui/card"
+import { getLocalDateKey, readMealEntries, readWaterLogs, type MealEntry, type WaterLogEntry } from "@/lib/user-data"
 
-const nutrientSummary = [
-  { label: "โปรตีน", value: "56g" },
-  { label: "ไขมัน", value: "38g" },
-  { label: "คาร์บ", value: "142g" },
-]
-
-const statCards = [
-  {
-    icon: <Droplets className="h-3.5 w-3.5 text-sky-500" />,
-    label: "น้ำวันนี้",
-    value: "5 / 8 แก้ว",
-    accent: "text-sky-500",
-  },
-  {
-    icon: <Flame className="h-3.5 w-3.5 text-orange-500" />,
-    label: "แคลอรี่เผา",
-    value: "340 kcal",
-    accent: "text-orange-500",
-  },
-  {
-    icon: <Target className="h-3.5 w-3.5 text-emerald-500" />,
-    label: "เป้าหมาย",
-    value: "68%",
-    accent: "text-emerald-500",
-  },
-]
+const calorieGoal = 1800
+const waterGoalMl = 2000
 
 const quickMeals = [
   { icon: "🌅", title: "เช้า", subtitle: "บันทึกแล้ว" },
@@ -38,17 +15,62 @@ const quickMeals = [
   { icon: "+", title: "ของว่าง", subtitle: "แตะเพิ่ม" },
 ]
 
-const latestMeals = [
-  { icon: "🍗", title: "ข้าวมันไก่", time: "12:30", calories: "520 kcal" },
-  { icon: "☕", title: "กาแฟลาเต้", time: "08:15", calories: "180 kcal" },
-  { icon: "🍌", title: "กล้วยหอม", time: "14:00", calories: "90 kcal" },
-]
-
 export default function General() {
-  const caloriesConsumed = 1240
-  const calorieGoal = 1800
+  const [meals, setMeals] = useState<MealEntry[]>([])
+  const [waterLogs, setWaterLogs] = useState<WaterLogEntry[]>([])
+
+  useEffect(() => {
+    setMeals(readMealEntries())
+    setWaterLogs(readWaterLogs())
+  }, [])
+
+  const todayKey = getLocalDateKey()
+  const todayMeals = useMemo(() => meals.filter((meal) => meal.date === todayKey), [meals, todayKey])
+  const caloriesConsumed = todayMeals.reduce((sum, meal) => sum + meal.calories, 0)
+  const protein = todayMeals.reduce((sum, meal) => sum + meal.protein, 0)
+  const fat = todayMeals.reduce((sum, meal) => sum + meal.fat, 0)
+  const carbs = todayMeals.reduce((sum, meal) => sum + meal.carbs, 0)
+  const waterTotalMl = waterLogs
+    .filter((item) => item.date === todayKey)
+    .reduce((sum, item) => sum + item.amount, 0)
+  const waterCups = Math.round(waterTotalMl / 250)
+  const targetCups = Math.round(waterGoalMl / 250)
   const caloriesLeft = calorieGoal - caloriesConsumed
-  const progressWidth = `${(caloriesConsumed / calorieGoal) * 100}%`
+  const progressWidth = `${Math.min((caloriesConsumed / calorieGoal) * 100, 100)}%`
+
+  const nutrientSummary = [
+    { label: "โปรตีน", value: `${Math.round(protein)}g` },
+    { label: "ไขมัน", value: `${Math.round(fat)}g` },
+    { label: "คาร์บ", value: `${Math.round(carbs)}g` },
+  ]
+
+  const statCards = [
+    {
+      icon: <Droplets className="h-3.5 w-3.5 text-sky-500" />,
+      label: "น้ำวันนี้",
+      value: `${waterCups} / ${targetCups} แก้ว`,
+      accent: "text-sky-500",
+    },
+    {
+      icon: <Utensils className="h-3.5 w-3.5 text-orange-500" />,
+      label: "มื้อวันนี้",
+      value: `${todayMeals.length} มื้อ`,
+      accent: "text-orange-500",
+    },
+    {
+      icon: <Target className="h-3.5 w-3.5 text-emerald-500" />,
+      label: "เป้าหมาย",
+      value: `${Math.round(Math.min(caloriesConsumed / calorieGoal, 1) * 100)}%`,
+      accent: "text-emerald-500",
+    },
+  ]
+
+  const latestMeals = meals.slice(0, 3).map((meal) => ({
+    icon: "🍽️",
+    title: meal.name,
+    time: meal.time,
+    calories: `${meal.calories} kcal`,
+  }))
 
   return (
     <div className="w-full space-y-5 sm:space-y-7">
@@ -82,7 +104,9 @@ export default function General() {
               <div className="h-1.5 overflow-hidden rounded-full bg-white/22">
                 <div className="h-full rounded-full bg-white" style={{ width: progressWidth }} />
               </div>
-              <p className="text-[11px] font-medium text-white/90">เหลืออีก {caloriesLeft.toLocaleString()} kcal</p>
+              <p className="text-[11px] font-medium text-white/90">
+                {caloriesLeft >= 0 ? `เหลืออีก ${caloriesLeft.toLocaleString()} kcal` : `เกินเป้า ${Math.abs(caloriesLeft).toLocaleString()} kcal`}
+              </p>
             </div>
           </CardContent>
         </Card>
@@ -132,10 +156,11 @@ export default function General() {
         <CardContent className="space-y-2 p-4">
           <div className="flex items-center gap-2 text-sm font-semibold">
             <Sun className="h-4 w-4 text-amber-400" />
-            <span>Tip ของวันนี้</span>
+            <span>คำแนะนำวันนี้</span>
           </div>
           <p className="text-sm leading-6">
-            คุณได้รับโปรตีนเพียงพอแล้ว! ลองดื่มน้ำให้ครบ 8 แก้วด้วยนะ <Droplets className="mb-0.5 inline h-4 w-4 text-sky-500" />
+            {protein >= 20 ? "คุณได้รับโปรตีนค่อนข้างดีแล้ว!" : "ลองเพิ่มโปรตีนคุณภาพดีในมื้อถัดไป"}
+            {" "}อย่าลืมดื่มน้ำให้ครบ {targetCups} แก้วด้วยนะ <Droplets className="mb-0.5 inline h-4 w-4 text-sky-500" />
           </p>
         </CardContent>
       </Card>
@@ -144,6 +169,13 @@ export default function General() {
         <h2 className="text-lg font-semibold text-neutral-900">มื้อล่าสุด</h2>
 
         <div className="w-full max-w-[520px] space-y-2.5">
+          {latestMeals.length === 0 && (
+            <Card className="py-0 shadow-[0_14px_28px_-24px_rgba(15,23,42,0.16)]">
+              <CardContent className="p-4 text-sm font-medium text-neutral-500">
+                ยังไม่มีมื้ออาหารที่บันทึกไว้
+              </CardContent>
+            </Card>
+          )}
           {latestMeals.map((meal) => (
             <Card key={`${meal.title}-${meal.time}`} className="py-0 shadow-[0_14px_28px_-24px_rgba(15,23,42,0.16)]">
               <CardContent className="flex min-h-[48px] items-center justify-between gap-4 p-4">

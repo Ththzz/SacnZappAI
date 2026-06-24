@@ -14,7 +14,7 @@ import {
   XIcon,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { addMealEntry } from '@/lib/user-data'
+import { addMealEntry, getLocalDateKey } from '@/lib/user-data'
 
 type ScanResult = {
   name: string
@@ -32,9 +32,9 @@ type ApiResult = ScanResult & {
 }
 
 const macroItems = [
-  { key: 'protein', label: 'Protein', unit: 'g', color: 'bg-emerald-500', soft: 'bg-emerald-50 text-emerald-700' },
-  { key: 'carbs', label: 'Carb', unit: 'g', color: 'bg-sky-500', soft: 'bg-sky-50 text-sky-700' },
-  { key: 'fat', label: 'Fat', unit: 'g', color: 'bg-amber-500', soft: 'bg-amber-50 text-amber-700' },
+  { key: 'protein', label: 'โปรตีน', unit: 'g', color: 'bg-emerald-500', soft: 'bg-emerald-50 text-emerald-700' },
+  { key: 'carbs', label: 'คาร์บ', unit: 'g', color: 'bg-sky-500', soft: 'bg-sky-50 text-sky-700' },
+  { key: 'fat', label: 'ไขมัน', unit: 'g', color: 'bg-amber-500', soft: 'bg-amber-50 text-amber-700' },
 ] as const
 
 type ProcessingStepStatus = 'done' | 'active' | 'pending'
@@ -48,7 +48,7 @@ const processingSteps = [
 ] as const
 
 const maxFileSize = 10 * 1024 * 1024
-const modelLabel = process.env.NEXT_PUBLIC_GEMINI_MODEL?.trim() || 'gemini-2.5-flash'
+const modelLabel = process.env.NEXT_PUBLIC_AI_MODEL?.trim() || 'qwen/qwen3.7-plus'
 
 function readFileAsDataUrl(file: File) {
   return new Promise<string>((resolve, reject) => {
@@ -242,10 +242,10 @@ export default function ScanPageClient() {
     await analyzeDataUrl(image)
   }
 
-  const saveScanResult = () => {
-    if (!result) return
+  const saveScanResult = async () => {
+    if (!result || saved) return
     const now = new Date()
-    addMealEntry({
+    const entry = {
       id: `scan-${now.getTime()}`,
       name: result.name,
       calories: result.calories,
@@ -255,9 +255,17 @@ export default function ScanPageClient() {
       confidence: result.confidence,
       note: result.note,
       time: now.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', hour12: false }),
-      date: now.toISOString().slice(0, 10),
+      date: getLocalDateKey(now),
       source: 'scan',
-    })
+    } as const
+
+    const response = await fetch('/api/meals', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(entry),
+    }).catch(() => null)
+
+    if (!response?.ok) addMealEntry(entry)
     setSaved(true)
   }
 
@@ -377,7 +385,7 @@ export default function ScanPageClient() {
             <aside className="animate-[resultIn_.55s_ease-out_both] rounded-2xl border border-emerald-100 bg-white p-5 shadow-sm shadow-emerald-950/5">
               <div className="mb-5 flex items-start justify-between gap-3">
                 <div>
-                  <p className="text-xs font-medium uppercase tracking-[0.16em] text-emerald-600">AI Result</p>
+                  <p className="text-xs font-medium text-emerald-600">ผลจาก ScanZapp AI</p>
                   <h2 className="mt-1 text-xl font-bold text-neutral-950">ผลการวิเคราะห์</h2>
                 </div>
                 <div className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
@@ -443,7 +451,7 @@ export default function ScanPageClient() {
               {result.note && <p className="mt-5 rounded-2xl bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{result.note}</p>}
 
               <div className="mt-7 grid gap-3 sm:grid-cols-2">
-                <Button className="h-11 rounded-full bg-emerald-600 text-white hover:bg-emerald-700" onClick={saveScanResult}>
+                <Button className="h-11 rounded-full bg-emerald-600 text-white hover:bg-emerald-700" onClick={saveScanResult} disabled={saved}>
                   <SaveIcon className="size-4" />
                   {saved ? 'บันทึกแล้ว' : 'บันทึกข้อมูล'}
                 </Button>
@@ -504,7 +512,7 @@ function ScanProcessingView({ preview }: { preview: string }) {
             </div>
             <div className="absolute left-5 top-5 inline-flex items-center gap-2 rounded-full bg-white/90 px-4 py-2 text-sm font-extrabold text-emerald-600 shadow-sm backdrop-blur">
               <LoaderCircleIcon className="size-4 animate-spin" />
-              AI Processing
+              ScanZapp AI กำลังประมวลผล
             </div>
             <p className="absolute bottom-5 left-5 right-5 text-sm font-semibold text-white drop-shadow">
               {processingSteps[activeStepIndex].caption}
@@ -522,10 +530,9 @@ function ScanProcessingView({ preview }: { preview: string }) {
         </div>
 
         <aside className="flex flex-col justify-center">
-          <p className="text-sm font-medium text-neutral-400">07 · AI Processing</p>
           <h1 className="mt-1 text-2xl font-extrabold text-neutral-950">กำลังวิเคราะห์...</h1>
           <p className="mt-2 text-sm font-medium leading-6 text-neutral-500">
-            ระบบกำลังประมวลผลรูปจริงที่คุณถ่ายหรืออัปโหลด และจะเปลี่ยนไปหน้าผลลัพธ์ทันทีเมื่อ API วิเคราะห์เสร็จ
+            ระบบกำลังประมวลผลรูปจริงที่คุณถ่ายหรืออัปโหลด และจะเปลี่ยนไปหน้าผลลัพธ์ทันทีเมื่อวิเคราะห์เสร็จ
           </p>
 
           <h2 className="mb-4 mt-8 text-sm font-extrabold text-neutral-950">ขั้นตอนการวิเคราะห์</h2>
@@ -574,4 +581,3 @@ function StepStatusIcon({ status }: { status: ProcessingStepStatus }) {
 
   return <span className="flex size-6 items-center justify-center rounded-full bg-neutral-200" />
 }
-

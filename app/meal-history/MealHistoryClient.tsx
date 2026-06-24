@@ -16,14 +16,15 @@ import {
   Utensils,
   X,
 } from "lucide-react"
-import { readMealEntries } from "@/lib/user-data"
+import { getLocalDateKey, readMealEntries } from "@/lib/user-data"
 
 type ViewMode = "day" | "week" | "month"
 type DayMeal = {
-  id: number
+  id: string
   icon: string
   name: string
   time: string
+  date: string
   calories: number
   tone: string
   protein?: number
@@ -34,82 +35,21 @@ type DayMeal = {
   note?: string
 }
 
-const mealDetailsById: Record<number, {
-  protein: number
-  carbs: number
-  fat: number
-  portion: string
-  source: string
-  confidence: number
-  ingredients: string[]
-  note: string
-}> = {
-  1: {
-    protein: 7,
-    carbs: 18,
-    fat: 8,
-    portion: "1 แก้วกลาง",
-    source: "อัปโหลดรูป",
-    confidence: 92,
-    ingredients: ["นมสด", "เอสเปรสโซ", "น้ำตาลเล็กน้อย"],
-    note: "น้ำตาลอยู่ในระดับพอดี แต่ถ้าดื่มทุกวันควรลดไซรัปลงครึ่งหนึ่ง",
-  },
-  2: {
-    protein: 28,
-    carbs: 62,
-    fat: 18,
-    portion: "1 จาน",
-    source: "ถ่ายจากกล้อง",
-    confidence: 88,
-    ingredients: ["ข้าวมัน", "ไก่ต้ม", "น้ำจิ้ม", "แตงกวา"],
-    note: "โปรตีนดี แต่ไขมันค่อนข้างสูงจากข้าวมันและหนังไก่",
-  },
-  3: {
-    protein: 1,
-    carbs: 23,
-    fat: 0,
-    portion: "1 ลูก",
-    source: "บันทึกด้วยมือ",
-    confidence: 96,
-    ingredients: ["กล้วยหอม"],
-    note: "เป็นของว่างที่ดี ให้พลังงานเร็วและไขมันต่ำ",
-  },
-  4: {
-    protein: 12,
-    carbs: 78,
-    fat: 9,
-    portion: "1 ชุด",
-    source: "อัปโหลดรูป",
-    confidence: 84,
-    ingredients: ["มะละกอ", "ถั่วฝักยาว", "ข้าวเหนียว", "น้ำปลา", "น้ำตาลปี๊บ"],
-    note: "คาร์บสูงจากข้าวเหนียว ถ้ามื้อดึกควรลดข้าวเหนียวลงครึ่งหนึ่ง",
-  },
+type WeekDaySummary = {
+  day: string
+  full: string
+  meals: number
+  calories: number
+  status: "good" | "warn" | "bad" | "empty"
 }
 
-const dayMeals = [
-  { id: 1, icon: "☕", name: "กาแฟลาเต้", time: "08:15", calories: 180, tone: "good" },
-  { id: 2, icon: "🍗", name: "ข้าวมันไก่", time: "12:30", calories: 520, tone: "good" },
-  { id: 3, icon: "🍌", name: "กล้วยหอม 1 ลูก", time: "14:00", calories: 90, tone: "good" },
-  { id: 4, icon: "🌶️", name: "ส้มตำ + ข้าวเหนียว", time: "19:00", calories: 450, tone: "warn" },
-]
-
-const weekDays = [
-  { day: "จ", full: "จันทร์ 14 เม.ย.", meals: 4, calories: 1520, status: "good" },
-  { day: "อ", full: "อังคาร 15 เม.ย.", meals: 3, calories: 1750, status: "good" },
-  { day: "พ", full: "พุธ 16 เม.ย.", meals: 4, calories: 1680, status: "good" },
-  { day: "พฤ", full: "พฤหัส 17 เม.ย.", meals: 5, calories: 1920, status: "warn" },
-  { day: "ศ", full: "ศุกร์ 18 เม.ย.", meals: 4, calories: 1600, status: "good" },
-  { day: "ส", full: "เสาร์ 19 เม.ย.", meals: 5, calories: 2100, status: "bad" },
-  { day: "อา", full: "อาทิตย์ 20 เม.ย.", meals: 3, calories: 1480, status: "good" },
-]
-
-const monthDays = Array.from({ length: 30 }, (_, index) => {
-  const day = index + 1
-  const entries = [5, 3, 4, 3, 3, 3, 4, 3, 4, 3, 4, 3, 3, 3, 3, 3, 4, 3, 3, 4, 3, 3, 4, 0, 0, 0, 0, 0, 0, 0][index]
-  const status = day === 10 || day === 17 ? "warn" : day === 19 ? "bad" : entries > 0 ? "good" : "empty"
-
-  return { day, entries, status }
-})
+type MonthDaySummary = {
+  day: number
+  entries: number
+  calories: number
+  status: "good" | "warn" | "bad" | "empty"
+  isToday: boolean
+}
 
 const macroRows = [
   { label: "โปรตีน", current: 56, target: 72, color: "bg-emerald-400" },
@@ -117,27 +57,73 @@ const macroRows = [
   { label: "ไขมัน", current: 38, target: 55, color: "bg-orange-400" },
 ]
 
-const monthSummary = [
-  { icon: Flame, label: "แคลอรี่เฉลี่ย/วัน", value: "1,720 kcal", bg: "bg-amber-50", color: "text-orange-500" },
-  { icon: Utensils, label: "มื้ออาหารทั้งหมด", value: "76 มื้อ", bg: "bg-emerald-50", color: "text-emerald-500" },
-  { icon: Trophy, label: "วันที่ทำสำเร็จ", value: "16/20 วัน", bg: "bg-emerald-50", color: "text-amber-500" },
-  { icon: Scale, label: "น้ำหนักเปลี่ยน", value: "-1.2 kg", bg: "bg-slate-50", color: "text-slate-500" },
-]
+function buildWeekDays(meals: DayMeal[]): WeekDaySummary[] {
+  const dayLabels = ["อา", "จ", "อ", "พ", "พฤ", "ศ", "ส"]
+  const fullDayLabels = ["อาทิตย์", "จันทร์", "อังคาร", "พุธ", "พฤหัส", "ศุกร์", "เสาร์"]
+  const formatter = new Intl.DateTimeFormat("th-TH", { day: "numeric", month: "short" })
+  const today = new Date()
+
+  return Array.from({ length: 7 }, (_, index) => {
+    const date = new Date(today)
+    date.setDate(today.getDate() - (6 - index))
+    const dateKey = getLocalDateKey(date)
+    const dayMeals = meals.filter((meal) => meal.date === dateKey)
+    const calories = dayMeals.reduce((sum, meal) => sum + meal.calories, 0)
+    const status: WeekDaySummary["status"] =
+      calories === 0 ? "empty" : calories > 2200 ? "bad" : calories > 1800 ? "warn" : "good"
+
+    return {
+      day: dayLabels[date.getDay()],
+      full: `${fullDayLabels[date.getDay()]} ${formatter.format(date)}`,
+      meals: dayMeals.length,
+      calories,
+      status,
+    }
+  })
+}
+
+function getCurrentMonthLabel() {
+  return new Intl.DateTimeFormat("th-TH", { month: "long", year: "numeric" }).format(new Date())
+}
+
+function buildMonthDays(meals: DayMeal[]): MonthDaySummary[] {
+  const today = new Date()
+  const year = today.getFullYear()
+  const month = today.getMonth()
+  const daysInMonth = new Date(year, month + 1, 0).getDate()
+  const todayKey = getLocalDateKey(today)
+
+  return Array.from({ length: daysInMonth }, (_, index) => {
+    const date = new Date(year, month, index + 1)
+    const dateKey = getLocalDateKey(date)
+    const dayMeals = meals.filter((meal) => meal.date === dateKey)
+    const calories = dayMeals.reduce((sum, meal) => sum + meal.calories, 0)
+    const status: MonthDaySummary["status"] =
+      calories === 0 ? "empty" : calories > 2200 ? "bad" : calories > 1800 ? "warn" : "good"
+
+    return {
+      day: index + 1,
+      entries: dayMeals.length,
+      calories,
+      status,
+      isToday: dateKey === todayKey,
+    }
+  })
+}
 
 export default function MealHistoryClient() {
   const [activeView, setActiveView] = useState<ViewMode>("day")
   const [selectedMeal, setSelectedMeal] = useState<DayMeal | null>(null)
-  const [historyMeals, setHistoryMeals] = useState<DayMeal[]>(dayMeals)
+  const [historyMeals, setHistoryMeals] = useState<DayMeal[]>([])
+  const todayKey = getLocalDateKey()
 
   useEffect(() => {
-    const stored = readMealEntries()
-    if (stored.length === 0) return
-
-    const converted: DayMeal[] = stored.slice(0, 20).map((item, index) => ({
-      id: Number(item.id.replace(/\D/g, "").slice(-6) || `${1000 + index}`),
+    const convertMeals = (items: ReturnType<typeof readMealEntries>) => items.slice(0, 20).map((item, index) => ({
+      id: item.id || `meal-${index}`,
       icon: "🍽️",
       name: item.name,
       time: item.time,
+      date: item.date,
       calories: item.calories,
       tone: item.calories > 420 ? "warn" : "good",
       protein: item.protein,
@@ -148,36 +134,30 @@ export default function MealHistoryClient() {
       note: item.note,
     }))
 
-    setHistoryMeals((current) => {
-      const merged = [...converted, ...current]
-      const deduped = merged.filter((meal, idx) => merged.findIndex((item) => item.name === meal.name && item.time === meal.time) === idx)
-      return deduped.slice(0, 24)
-    })
+    fetch("/api/meals")
+      .then(async (response) => {
+        const data = (await response.json().catch(() => ({}))) as { meals?: ReturnType<typeof readMealEntries> }
+        if (!response.ok) throw new Error("api")
+        setHistoryMeals(convertMeals(data.meals ?? []))
+      })
+      .catch(() => setHistoryMeals(convertMeals(readMealEntries())))
   }, [])
 
-  const dailyCalories = historyMeals.reduce((total, meal) => total + meal.calories, 0)
+  const todayMeals = historyMeals.filter((meal) => meal.date === todayKey)
+  const dailyCalories = todayMeals.reduce((total, meal) => total + meal.calories, 0)
+  const weekDays = useMemo(() => buildWeekDays(historyMeals), [historyMeals])
+  const monthDays = useMemo(() => buildMonthDays(historyMeals), [historyMeals])
   const weeklyCalories = weekDays.reduce((total, day) => total + day.calories, 0)
-  const averageCalories = Math.round(weeklyCalories / weekDays.length)
-
-  const pageSubtitle = useMemo(() => {
-    if (activeView === "day") return "วันที่ 20 เมษายน 2026"
-    if (activeView === "week") return "สัปดาห์ที่ 14-20 เมษายน 2026"
-    return "เมษายน 2026"
-  }, [activeView])
+  const daysWithMeals = weekDays.filter((day) => day.meals > 0).length
+  const averageCalories = daysWithMeals > 0 ? Math.round(weeklyCalories / daysWithMeals) : 0
 
   return (
     <div className="mx-auto max-w-7xl space-y-5 text-neutral-900">
-      <header className="flex flex-col gap-1">
-        <p className="text-sm font-medium text-neutral-400">04 · Meal History</p>
-        <h1 className="text-2xl font-bold tracking-normal">ประวัติมื้ออาหาร</h1>
-        <p className="text-sm text-neutral-500">{pageSubtitle}</p>
-      </header>
-
       <ViewTabs activeView={activeView} onChange={setActiveView} />
 
-      {activeView === "day" && <DailyView meals={historyMeals} dailyCalories={dailyCalories} onSelectMeal={setSelectedMeal} />}
-      {activeView === "week" && <WeeklyView averageCalories={averageCalories} />}
-      {activeView === "month" && <MonthlyView />}
+      {activeView === "day" && <DailyView meals={todayMeals} dailyCalories={dailyCalories} onSelectMeal={setSelectedMeal} />}
+      {activeView === "week" && <WeeklyView averageCalories={averageCalories} weekDays={weekDays} />}
+      {activeView === "month" && <MonthlyView monthDays={monthDays} />}
 
       {selectedMeal && <MealDetailModal meal={selectedMeal} onClose={() => setSelectedMeal(null)} />}
     </div>
@@ -219,7 +199,7 @@ function DailyView({ meals, dailyCalories, onSelectMeal }: { meals: DayMeal[]; d
           <section className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-black/5">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <h2 className="text-base font-extrabold">18 เมษายน 2026</h2>
+                <h2 className="text-base font-extrabold">วันนี้</h2>
                 <p className="text-sm text-neutral-500">รวม {dailyCalories.toLocaleString()} kcal จาก {meals.length} มื้อ</p>
               </div>
               <span className="text-sm font-extrabold text-[#2EC78F]">{percent}%</span>
@@ -230,14 +210,19 @@ function DailyView({ meals, dailyCalories, onSelectMeal }: { meals: DayMeal[]; d
           </section>
 
           <div className="grid content-start gap-3">
-            <ExportButton label="Export PDF" />
-            <ExportButton label="Export CSV" />
+            <ExportButton label="ส่งออก PDF" />
+            <ExportButton label="ส่งออก CSV" />
           </div>
         </div>
 
         <section>
           <h2 className="text-base font-extrabold">มื้ออาหารวันนี้</h2>
           <div className="mt-3 space-y-3">
+            {meals.length === 0 && (
+              <div className="rounded-2xl bg-white p-5 text-sm font-medium text-neutral-500 shadow-sm ring-1 ring-black/5">
+                ยังไม่มีมื้ออาหารที่บันทึกไว้ ลองสแกนอาหารจากหน้าสแกนอาหารเพื่อเริ่มสร้างประวัติจริง
+              </div>
+            )}
             {meals.map((meal) => (
               <article
                 key={meal.id}
@@ -256,7 +241,7 @@ function DailyView({ meals, dailyCalories, onSelectMeal }: { meals: DayMeal[]; d
                 <div className="flex h-10 w-10 items-center justify-center rounded-full bg-neutral-50 text-xl">{meal.icon}</div>
                 <div className="min-w-0">
                   <h3 className="truncate text-sm font-extrabold">{meal.name}</h3>
-                  <p className="text-xs font-medium text-neutral-400">{meal.time} · {mealDetailsById[meal.id]?.portion}</p>
+                  <p className="text-xs font-medium text-neutral-400">{meal.date} · {meal.time}</p>
                 </div>
                 <p className={`text-sm font-extrabold ${meal.tone === "warn" ? "text-orange-500" : "text-[#2EC78F]"}`}>{meal.calories} kcal</p>
                 <button type="button" className="flex h-7 w-7 items-center justify-center rounded-full bg-neutral-50 text-neutral-300 hover:bg-rose-50 hover:text-rose-500" aria-label={`ลบ ${meal.name}`}>
@@ -282,7 +267,7 @@ function DailyView({ meals, dailyCalories, onSelectMeal }: { meals: DayMeal[]; d
         </div>
         <MacroSummary />
         <div className="rounded-2xl bg-emerald-50 p-4 text-sm text-emerald-700">
-          <p className="font-extrabold">AI ข้อเสนอแนะ</p>
+          <p className="font-extrabold">ข้อเสนอแนะจาก ScanZapp AI</p>
           <p className="mt-2 text-xs leading-5">ควรเพิ่มเป้าหมายแคลอรี่มื้ออื่นด้วยโปรตีนคุณภาพดีและผักให้มากขึ้น</p>
         </div>
       </aside>
@@ -290,20 +275,23 @@ function DailyView({ meals, dailyCalories, onSelectMeal }: { meals: DayMeal[]; d
   )
 }
 
-function WeeklyView({ averageCalories }: { averageCalories: number }) {
-  const bestPercent = 89
+function WeeklyView({ averageCalories, weekDays }: { averageCalories: number; weekDays: WeekDaySummary[] }) {
   const maxCalories = 2200
   const targetCalories = 1800
   const chartHeight = 150
   const targetLineBottom = (targetCalories / maxCalories) * chartHeight
+  const totalMeals = weekDays.reduce((sum, day) => sum + day.meals, 0)
+  const trackedDays = weekDays.filter((day) => day.meals > 0)
+  const onTargetDays = trackedDays.filter((day) => day.calories <= targetCalories).length
+  const consistency = trackedDays.length > 0 ? Math.round((onTargetDays / trackedDays.length) * 100) : 0
 
   return (
     <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(360px,0.95fr)]">
       <main className="space-y-5">
         <section className="grid gap-4 rounded-2xl bg-white p-5 shadow-sm ring-1 ring-black/5 sm:grid-cols-3">
-          <StatBlock label="สรุปสัปดาห์นี้" value={averageCalories.toLocaleString()} helper="14-20 เม.ย. 2026" />
-          <StatBlock label="มื้อทั้งหมด" value="28" helper="มื้อ" />
-          <StatBlock label="เข้าเป้า" value={`${bestPercent}%`} helper="ความสม่ำเสมอ" valueClassName="text-[#2EC78F]" />
+          <StatBlock label="สรุปสัปดาห์นี้" value={averageCalories.toLocaleString()} helper="kcal เฉลี่ยต่อวันที่มีข้อมูล" />
+          <StatBlock label="มื้อทั้งหมด" value={totalMeals.toLocaleString()} helper="มื้อ" />
+          <StatBlock label="เข้าเป้า" value={`${consistency}%`} helper="วันที่มีข้อมูล" valueClassName="text-[#2EC78F]" />
         </section>
 
         <section className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-black/5">
@@ -315,12 +303,12 @@ function WeeklyView({ averageCalories }: { averageCalories: number }) {
               <div className="relative flex h-full items-end justify-between gap-4">
                 {weekDays.map((item) => (
                   <div key={item.day} className="flex min-w-0 flex-1 flex-col items-center">
-                    <span className={`mb-2 text-[10px] font-bold ${item.status === "warn" || item.status === "bad" ? "text-orange-400" : "text-[#2EC78F]"}`}>
+                    <span className={`mb-2 text-[10px] font-bold ${item.status === "empty" ? "text-neutral-300" : item.status === "warn" || item.status === "bad" ? "text-orange-400" : "text-[#2EC78F]"}`}>
                       {item.calories}
                     </span>
                     <div
-                      className={`w-full max-w-12 rounded-md ${item.status === "warn" || item.status === "bad" ? "bg-orange-400" : "bg-[#2EC78F]"}`}
-                      style={{ height: `${Math.max(44, (item.calories / maxCalories) * chartHeight)}px` }}
+                      className={`w-full max-w-12 rounded-md ${item.status === "empty" ? "bg-neutral-200" : item.status === "warn" || item.status === "bad" ? "bg-orange-400" : "bg-[#2EC78F]"}`}
+                      style={{ height: `${item.calories === 0 ? 12 : Math.max(44, (item.calories / maxCalories) * chartHeight)}px` }}
                     />
                   </div>
                 ))}
@@ -346,7 +334,7 @@ function WeeklyView({ averageCalories }: { averageCalories: number }) {
                 <StatusIcon status={item.status} />
                 <span className="font-semibold text-neutral-600">{item.full}</span>
                 <span className="text-center font-semibold text-neutral-500">{item.meals}</span>
-                <span className={`text-right font-extrabold ${item.status === "warn" || item.status === "bad" ? "text-orange-500" : "text-[#2EC78F]"}`}>{item.calories} kcal</span>
+                <span className={`text-right font-extrabold ${item.status === "empty" ? "text-neutral-300" : item.status === "warn" || item.status === "bad" ? "text-orange-500" : "text-[#2EC78F]"}`}>{item.calories} kcal</span>
               </div>
             ))}
           </div>
@@ -361,7 +349,19 @@ function WeeklyView({ averageCalories }: { averageCalories: number }) {
   )
 }
 
-function MonthlyView() {
+function MonthlyView({ monthDays }: { monthDays: MonthDaySummary[] }) {
+  const trackedDays = monthDays.filter((item) => item.entries > 0)
+  const totalCalories = monthDays.reduce((sum, item) => sum + item.calories, 0)
+  const totalMeals = monthDays.reduce((sum, item) => sum + item.entries, 0)
+  const onTargetDays = trackedDays.filter((item) => item.calories <= 1800).length
+  const averageCalories = trackedDays.length > 0 ? Math.round(totalCalories / trackedDays.length) : 0
+  const monthSummary = [
+    { icon: Flame, label: "แคลอรี่เฉลี่ย/วัน", value: `${averageCalories.toLocaleString()} kcal`, bg: "bg-amber-50", color: "text-orange-500" },
+    { icon: Utensils, label: "มื้ออาหารทั้งหมด", value: `${totalMeals.toLocaleString()} มื้อ`, bg: "bg-emerald-50", color: "text-emerald-500" },
+    { icon: Trophy, label: "วันที่ทำสำเร็จ", value: `${onTargetDays}/${trackedDays.length} วัน`, bg: "bg-emerald-50", color: "text-amber-500" },
+    { icon: Scale, label: "วันที่มีข้อมูล", value: `${trackedDays.length}/${monthDays.length} วัน`, bg: "bg-slate-50", color: "text-slate-500" },
+  ]
+
   return (
     <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_330px]">
       <main className="space-y-4">
@@ -369,7 +369,7 @@ function MonthlyView() {
           <button type="button" className="text-neutral-400 hover:text-neutral-700" aria-label="เดือนก่อนหน้า">
             <ArrowLeft className="h-4 w-4" />
           </button>
-          <h2 className="text-sm font-extrabold">เมษายน 2026</h2>
+          <h2 className="text-sm font-extrabold">{getCurrentMonthLabel()}</h2>
           <button type="button" className="text-neutral-400 hover:text-neutral-700" aria-label="เดือนถัดไป">
             <ArrowRight className="h-4 w-4" />
           </button>
@@ -388,7 +388,7 @@ function MonthlyView() {
                 key={item.day}
                 type="button"
                 className={`min-h-[58px] rounded-lg bg-neutral-50 p-2 text-left ring-1 ring-transparent transition-colors hover:bg-neutral-100 ${
-                  item.day === 20 ? "ring-[#2EC78F]" : ""
+                  item.isToday ? "ring-[#2EC78F]" : ""
                 }`}
               >
                 <span className="text-xs font-bold text-neutral-500">{item.day}</span>
@@ -418,8 +418,8 @@ function MonthlyView() {
 
       <aside className="space-y-4">
         <section className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-black/5">
-          <h2 className="text-sm font-extrabold">สรุปเดือนเมษายน</h2>
-          <p className="mt-1 text-xs font-semibold text-neutral-400">ผ่านไปแล้ว 20 วัน</p>
+          <h2 className="text-sm font-extrabold">สรุปเดือนนี้</h2>
+          <p className="mt-1 text-xs font-semibold text-neutral-400">จากข้อมูลที่บันทึกจริง</p>
           <div className="mt-4 space-y-3">
             {monthSummary.map((item) => {
               const Icon = item.icon
@@ -435,14 +435,14 @@ function MonthlyView() {
             })}
           </div>
         </section>
-        <ExportButton label="Export รายงานเดือน (PDF)" full />
+        <ExportButton label="ส่งออกรายงานเดือน (PDF)" full />
       </aside>
     </div>
   )
 }
 
 function MealDetailModal({ meal, onClose }: { meal: DayMeal; onClose: () => void }) {
-  const detail = mealDetailsById[meal.id] ?? {
+  const detail = {
     protein: meal.protein ?? 0,
     carbs: meal.carbs ?? 0,
     fat: meal.fat ?? 0,
@@ -486,7 +486,7 @@ function MealDetailModal({ meal, onClose }: { meal: DayMeal; onClose: () => void
               <p className="text-xs font-semibold text-neutral-500">kcal</p>
             </div>
             <InfoTile label="ที่มา" value={detail.source} />
-            <InfoTile label="ความมั่นใจ AI" value={`${detail.confidence}%`} />
+            <InfoTile label="ความมั่นใจของ ScanZapp AI" value={`${detail.confidence}%`} />
           </div>
 
           <section>
@@ -516,7 +516,7 @@ function MealDetailModal({ meal, onClose }: { meal: DayMeal; onClose: () => void
           </section>
 
           <section className="rounded-2xl bg-emerald-50 p-4 text-sm text-emerald-700">
-            <h3 className="font-extrabold">AI ข้อเสนอแนะ</h3>
+            <h3 className="font-extrabold">ข้อเสนอแนะจาก ScanZapp AI</h3>
             <p className="mt-2 leading-6">{detail.note}</p>
           </section>
         </div>
@@ -581,6 +581,7 @@ function StatBlock({ label, value, helper, valueClassName = "text-neutral-900" }
 function StatusIcon({ status }: { status: string }) {
   if (status === "bad") return <Trash2 className="h-4 w-4 text-red-500" />
   if (status === "warn") return <AlertTriangle className="h-4 w-4 text-neutral-900" />
+  if (status === "empty") return <Clock className="h-4 w-4 text-neutral-300" />
   return (
     <span className="flex h-4 w-4 items-center justify-center rounded-sm bg-green-500 text-white">
       <Check className="h-3 w-3" />

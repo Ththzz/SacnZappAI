@@ -1,6 +1,7 @@
 "use client"
 
 import Link from "next/link"
+import { useRouter } from "next/navigation"
 import { useEffect, useMemo, useState } from "react"
 import {
   Bell,
@@ -43,6 +44,7 @@ const STORAGE_KEYS_TO_CLEAR = [
   "nutriscan.settings.v1",
   "nutriscan.water.logs",
   "nutriscan.meal.history",
+  "nutriscan.profile",
   "nutriscan.scan.history",
 ]
 
@@ -69,32 +71,53 @@ const activityFactor: Record<ActivityLevel, number> = {
 }
 
 export default function SettingsClient() {
+  const router = useRouter()
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS)
   const [loaded, setLoaded] = useState(false)
   const [view, setView] = useState<"main" | "health-goal">("main")
   const [notice, setNotice] = useState<string | null>(null)
 
   useEffect(() => {
-    try {
-      const raw = window.localStorage.getItem(SETTINGS_STORAGE_KEY)
-      if (raw) {
-        const parsed = JSON.parse(raw) as AppSettings
-        setSettings({
-          notifications: { ...DEFAULT_SETTINGS.notifications, ...parsed.notifications },
-          healthGoal: { ...DEFAULT_SETTINGS.healthGoal, ...parsed.healthGoal },
-        })
-      }
-    } catch {
-      setSettings(DEFAULT_SETTINGS)
-    } finally {
-      setLoaded(true)
-    }
+    fetch("/api/settings")
+      .then(async (response) => {
+        const data = (await response.json().catch(() => ({}))) as { settings?: AppSettings | null }
+        if (!response.ok) throw new Error("api")
+        return data.settings
+      })
+      .catch(() => {
+        try {
+          const raw = window.localStorage.getItem(SETTINGS_STORAGE_KEY)
+          return raw ? (JSON.parse(raw) as AppSettings) : null
+        } catch {
+          return null
+        }
+      })
+      .then((parsed) => {
+        if (parsed) {
+          setSettings({
+            notifications: { ...DEFAULT_SETTINGS.notifications, ...parsed.notifications },
+            healthGoal: { ...DEFAULT_SETTINGS.healthGoal, ...parsed.healthGoal },
+          })
+        }
+      })
+      .finally(() => setLoaded(true))
   }, [])
 
   useEffect(() => {
     if (!loaded) return
     window.localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings))
+    fetch("/api/settings", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ settings }),
+    }).catch(() => undefined)
   }, [settings, loaded])
+
+  const signOut = async () => {
+    await fetch("/api/auth/sign-out", { method: "POST" }).catch(() => undefined)
+    router.replace("/sign-in")
+    router.refresh()
+  }
 
   const recommendation = useMemo(() => {
     const baseProtein = settings.healthGoal.currentWeightKg * 1.9
@@ -137,16 +160,22 @@ export default function SettingsClient() {
   }
 
   const exportData = () => {
+    const meals = readStoredJson("nutriscan.meal.history") ?? []
+    const waterLogs = readStoredJson("nutriscan.water.logs") ?? []
+    const profile = readStoredJson("nutriscan.profile")
     const payload = {
       exportedAt: new Date().toISOString(),
       settings,
+      meals,
+      waterLogs,
+      profile,
     }
 
     const jsonBlob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" })
-    downloadBlob(jsonBlob, "nutriscan-settings.json")
+    downloadBlob(jsonBlob, "nutriscan-data.json")
 
     const csvRows = [
-      ["section", "key", "value"],
+      ["section", "key", "value", "extra"],
       ["notification", "mealReminder", String(settings.notifications.mealReminder)],
       ["notification", "waterReminder", String(settings.notifications.waterReminder)],
       ["notification", "weeklyReport", String(settings.notifications.weeklyReport)],
@@ -156,13 +185,15 @@ export default function SettingsClient() {
       ["healthGoal", "targetWeightKg", String(settings.healthGoal.targetWeightKg)],
       ["healthGoal", "dailyCalories", String(settings.healthGoal.dailyCalories)],
       ["healthGoal", "activityLevel", settings.healthGoal.activityLevel],
+      ...toMealCsvRows(meals),
+      ...toWaterCsvRows(waterLogs),
     ]
 
     const csv = csvRows.map((row) => row.map(escapeCsv).join(",")).join("\n")
     const csvBlob = new Blob([csv], { type: "text/csv;charset=utf-8;" })
-    downloadBlob(csvBlob, "nutriscan-settings.csv")
+    downloadBlob(csvBlob, "nutriscan-data.csv")
 
-    setNotice("Export ข้อมูลเรียบร้อยแล้ว")
+    setNotice("ส่งออกข้อมูลเรียบร้อยแล้ว")
   }
 
   const clearHistory = () => {
@@ -175,7 +206,7 @@ export default function SettingsClient() {
   }
 
   if (!loaded) {
-    return <div className="mx-auto max-w-6xl text-sm text-neutral-500">Loading settings...</div>
+    return <div className="mx-auto max-w-6xl text-sm text-neutral-500">กำลังโหลดการตั้งค่า...</div>
   }
 
   if (view === "health-goal") {
@@ -193,12 +224,6 @@ export default function SettingsClient() {
 
   return (
     <div className="mx-auto max-w-6xl space-y-5 text-neutral-900">
-      <header className="space-y-1">
-        <p className="text-sm font-medium text-neutral-400">08 · Settings</p>
-        <h1 className="text-2xl font-bold tracking-normal">Settings</h1>
-        <p className="text-sm text-neutral-500">จัดการข้อมูลและการตั้งค่าการใช้งาน</p>
-      </header>
-
       {notice && (
         <div className="rounded-2xl bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-700">
           {notice}
@@ -219,24 +244,25 @@ export default function SettingsClient() {
           </SettingsCard>
 
           <SettingsCard title="ข้อมูลและความเป็นส่วนตัว">
-            <SettingsRow icon={Download} label="Export ข้อมูล" sub="JSON และ CSV" action={<button type="button" onClick={exportData} className="text-neutral-400 hover:text-neutral-700"><ChevronRight className="h-4 w-4" /></button>} />
+            <SettingsRow icon={Download} label="ส่งออกข้อมูล" sub="JSON และ CSV" action={<button type="button" onClick={exportData} className="text-neutral-400 hover:text-neutral-700"><ChevronRight className="h-4 w-4" /></button>} />
             <SettingsRow icon={Trash2} label="ลบประวัติทั้งหมด" sub="ไม่สามารถกู้คืนได้" danger action={<button type="button" onClick={clearHistory} className="text-neutral-400 hover:text-neutral-700"><ChevronRight className="h-4 w-4" /></button>} />
           </SettingsCard>
         </main>
 
         <aside className="rounded-3xl bg-white p-5 shadow-sm ring-1 ring-black/5">
-          <h2 className="text-2xl font-black">NutriScan AI</h2>
+          <h2 className="text-2xl font-black">ScanZapp AI</h2>
           <p className="mt-1 text-xs text-neutral-400">เวอร์ชัน 1.0.0</p>
           <p className="mt-4 text-sm leading-6 text-neutral-500">
             ระบบวิเคราะห์โภชนาการที่ช่วยให้คุณจัดการเป้าหมายสุขภาพได้ชัดเจนและสม่ำเสมอ
           </p>
           <button
             type="button"
+            onClick={signOut}
             className="mt-8 inline-flex h-11 w-full items-center justify-center gap-2 rounded-full border border-rose-300 text-sm font-bold text-rose-500 hover:bg-rose-50"
           >
             ออกจากระบบ
           </button>
-          <p className="mt-5 text-[11px] text-neutral-400">NutriScan AI v1.0 · © 2026</p>
+          <p className="mt-5 text-[11px] text-neutral-400">ScanZapp AI v1.0 · © 2026</p>
         </aside>
       </section>
     </div>
@@ -269,7 +295,7 @@ function HealthGoalView({
       <header className="space-y-1">
         <button type="button" onClick={onBack} className="inline-flex items-center gap-2 text-sm font-semibold text-neutral-500 hover:text-neutral-800">
           <ArrowLeft className="h-4 w-4" />
-          Settings
+          การตั้งค่า
         </button>
         <h1 className="text-2xl font-bold tracking-normal">เป้าหมายสุขภาพ</h1>
         <p className="text-sm text-neutral-500">แก้ไขเป้าหมายโภชนาการและอัตราการเปลี่ยนน้ำหนัก</p>
@@ -353,7 +379,7 @@ function HealthGoalView({
           <PlanRow icon={Goal} label="เป้าหมายน้ำหนัก" value={`${settings.healthGoal.targetWeightKg} kg (จาก ${settings.healthGoal.currentWeightKg})`} />
           <PlanRow icon={CalendarDays} label="ระยะเวลาโดยประมาณ" value={`~${recommendation.weeks} สัปดาห์`} />
           <div className="rounded-xl bg-emerald-50 p-3 text-xs font-medium text-emerald-700">
-            AI จะปรับแผนโภชนาการและสัดส่วนสารอาหารตามค่าที่บันทึกไว้
+            ระบบจะปรับแผนโภชนาการและสัดส่วนสารอาหารตามค่าที่บันทึกไว้
           </div>
         </aside>
       </section>
@@ -441,6 +467,45 @@ function Field({ label, value, onChange }: { label: string; value: number; onCha
 function escapeCsv(value: string) {
   const escaped = value.replaceAll('"', '""')
   return `"${escaped}"`
+}
+
+function readStoredJson(key: string) {
+  const raw = window.localStorage.getItem(key)
+  if (!raw) return null
+
+  try {
+    return JSON.parse(raw) as unknown
+  } catch {
+    return null
+  }
+}
+
+function toMealCsvRows(value: unknown) {
+  if (!Array.isArray(value)) return []
+
+  return value.map((entry) => {
+    const meal = entry as Record<string, unknown>
+    return [
+      "meal",
+      String(meal.name ?? ""),
+      String(meal.calories ?? ""),
+      String(meal.time ?? meal.date ?? ""),
+    ]
+  })
+}
+
+function toWaterCsvRows(value: unknown) {
+  if (!Array.isArray(value)) return []
+
+  return value.map((entry) => {
+    const waterLog = entry as Record<string, unknown>
+    return [
+      "water",
+      String(waterLog.time ?? ""),
+      String(waterLog.amount ?? ""),
+      "ml",
+    ]
+  })
 }
 
 function downloadBlob(blob: Blob, filename: string) {

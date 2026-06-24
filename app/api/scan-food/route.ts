@@ -13,10 +13,18 @@ type FoodAnalysis = {
 }
 
 const imageDataUrlPattern = /^data:image\/(png|jpe?g|webp|heic|heif);base64,/i
-const defaultGeminiModel = 'gemini-2.5-flash'
+const defaultQwenModel = 'qwen/qwen3.7-plus'
+const apiBaseUrl = process.env.AI_BASE_URL?.trim() || 'https://ai.psu.blue/v1'
+
 const retryableStatuses = new Set([429, 500, 502, 503, 504])
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+const isDevelopment = process.env.NODE_ENV === 'development'
+
+function logScanFoodDebug(message: string, details?: Record<string, unknown>) {
+  if (!isDevelopment) return
+  console.info('[scan-food]', message, details ?? '')
+}
 
 function isBusyModelMessage(message?: string) {
   if (!message) return false
@@ -40,24 +48,20 @@ function friendlyModelError(message: string | undefined, model: string) {
   return message ?? `เรียก ${model} ไม่สำเร็จ`
 }
 
-function extractOutputText(response: unknown) {
-  if (!response || typeof response !== 'object') return ''
+function parseImageDataUrl(image: unknown): { mimeType: string; imageData: string } | { error: string } {
+  if (typeof image !== 'string' || !imageDataUrlPattern.test(image)) {
+    return { error: 'กรุณาส่งไฟล์รูปภาพอาหารเป็น PNG, JPG, WEBP หรือ HEIC' }
+  }
 
-  const candidates = (response as { candidates?: unknown }).candidates
-  if (!Array.isArray(candidates)) return ''
+  const imageMatch = image.match(/^data:(image\/[^;]+);base64,(.+)$/i)
+  if (!imageMatch) {
+    return { error: 'รูปภาพต้องอยู่ในรูปแบบ base64 data URL' }
+  }
 
-  return candidates
-    .flatMap((candidate) => {
-      if (!candidate || typeof candidate !== 'object') return []
-      const content = (candidate as { content?: { parts?: unknown } }).content
-      return Array.isArray(content?.parts) ? content.parts : []
-    })
-    .map((part) => {
-      if (!part || typeof part !== 'object') return ''
-      return (part as { text?: unknown }).text
-    })
-    .filter((text): text is string => typeof text === 'string')
-    .join('')
+  return {
+    mimeType: imageMatch[1],
+    imageData: imageMatch[2],
+  }
 }
 
 function normalizeAnalysis(value: Partial<FoodAnalysis>): FoodAnalysis {
@@ -74,89 +78,130 @@ function normalizeAnalysis(value: Partial<FoodAnalysis>): FoodAnalysis {
   }
 }
 
-export async function POST(request: Request) {
-  const apiKey = process.env.GEMINI_API_KEY
-  const model = process.env.GEMINI_MODEL?.trim() || defaultGeminiModel
+function extractJsonFromContent(content: string): string {
+  const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/)
+  if (jsonMatch) return jsonMatch[1].trim()
 
-  if (!apiKey) {
-    return NextResponse.json({ error: `ยังไม่ได้ตั้งค่า GEMINI_API_KEY สำหรับวิเคราะห์ด้วย ${model}` }, { status: 500 })
+  const braceMatch = content.match(/\{[\s\S]*\}/)
+  if (braceMatch) return braceMatch[0]
+
+  return content
+}
+
+function parseJsonPayload(rawBody: string): Record<string, unknown> | null {
+  try {
+    return JSON.parse(rawBody) as Record<string, unknown>
+  } catch {
+    return null
+  }
+}
+
+function extractContentFromPayload(payload: Record<string, unknown>): string {
+  return (
+    (payload as { choices?: { message?: { content?: string } }[] })?.choices?.[0]?.message?.content ??
+    (payload as { output?: { choices?: { message?: { content?: string } }[] } })?.output?.choices?.[0]?.message?.content ??
+    (payload as { output?: { text?: string } })?.output?.text ??
+    ''
+  )
+}
+
+function parseStreamedPayload(rawBody: string): { payload: Record<string, unknown>; content: string } | null {
+  const dataLines = rawBody
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith('data:'))
+    .map((line) => line.replace(/^data:\s*/, '').trim())
+    .filter((line) => line && line !== '[DONE]')
+
+  if (dataLines.length === 0) return null
+
+  const chunks: Record<string, unknown>[] = []
+  let content = ''
+
+  for (const line of dataLines) {
+    const chunk = parseJsonPayload(line)
+    if (!chunk) continue
+
+    chunks.push(chunk)
+
+    const choices = (chunk as { choices?: { delta?: { content?: string }; message?: { content?: string } }[] }).choices
+    const deltaContent = choices?.[0]?.delta?.content ?? choices?.[0]?.message?.content ?? ''
+    content += deltaContent
   }
 
-  const body = (await request.json().catch(() => null)) as { image?: unknown } | null
-  const image = body?.image
+  if (chunks.length === 0) return null
 
-  if (typeof image !== 'string' || !imageDataUrlPattern.test(image)) {
-    return NextResponse.json({ error: 'กรุณาส่งไฟล์รูปภาพอาหารเป็น PNG, JPG, WEBP หรือ HEIC' }, { status: 400 })
-  }
-
-  const imageMatch = image.match(/^data:(image\/[^;]+);base64,(.+)$/i)
-  if (!imageMatch) {
-    return NextResponse.json({ error: 'รูปภาพต้องอยู่ในรูปแบบ base64 data URL' }, { status: 400 })
-  }
-
-  const [, mimeType, imageData] = imageMatch
-
-  const requestBody = JSON.stringify({
-    system_instruction: {
-      parts: [
+  return {
+    payload: {
+      object: 'chat.completion.stream',
+      chunks,
+      choices: [
         {
-          text:
-            'You are NutriScan AI. Analyze only food or drink photos. If the image is not clearly food or drink, return isFood=false and do not invent nutrition. Estimate nutrition conservatively for one visible serving. Respond in Thai where text is needed.',
+          message: {
+            content,
+          },
         },
       ],
     },
-    contents: [
+    content,
+  }
+}
+
+function parseQwenResponseBody(rawBody: string) {
+  let payload = parseJsonPayload(rawBody)
+  const streamedPayload = payload ? null : parseStreamedPayload(rawBody)
+
+  if (!payload && streamedPayload) {
+    payload = streamedPayload.payload
+  }
+
+  return { payload, streamedPayload }
+}
+
+function buildQwenRequestBody(model: string, mimeType: string, imageData: string) {
+  return {
+    model,
+    stream: false,
+    messages: [
+      {
+        role: 'system',
+        content:
+          'You are ScanZapp AI. Analyze only food or drink photos. If the image is not clearly food or drink, return isFood=false and do not invent nutrition. Estimate nutrition conservatively for one visible serving. Respond in Thai where text is needed. You MUST respond with ONLY a valid JSON object, no markdown, no explanation outside the JSON.',
+      },
       {
         role: 'user',
-        parts: [
+        content: [
           {
-            text:
-              'ตรวจภาพนี้ว่าเป็นอาหารหรือไม่ ถ้าเป็นอาหาร ให้ระบุชื่อเมนู แคลอรี่โดยประมาณ และสารอาหารหลัก Protein, Carb, Fat เป็นกรัม ถ้าไม่ใช่อาหารให้ isFood=false และบอกเหตุผลสั้น ๆ',
+            type: 'text',
+            text: 'ตรวจภาพนี้ว่าเป็นอาหารหรือไม่ ถ้าเป็นอาหาร ให้ระบุชื่อเมนู แคลอรี่โดยประมาณ และสารอาหารหลักโปรตีน คาร์บ และไขมันเป็นกรัม ถ้าไม่ใช่อาหารให้ isFood=false และบอกเหตุผลสั้น ๆ ตอบเป็น JSON เท่านั้นตามฟอร์แมตนี้: {"isFood":boolean,"reason":"string","name":"string","calories":number,"protein":number,"carbs":number,"fat":number,"confidence":number,"note":"string"}',
           },
           {
-            inline_data: {
-              mime_type: mimeType,
-              data: imageData,
+            type: 'image_url',
+            image_url: {
+              url: `data:${mimeType};base64,${imageData}`,
             },
           },
         ],
       },
     ],
-    generationConfig: {
-      responseMimeType: 'application/json',
-      responseJsonSchema: {
-        type: 'object',
-        additionalProperties: false,
-        properties: {
-          isFood: { type: 'boolean', description: 'Whether the image clearly contains food or drink.' },
-          reason: { type: 'string', description: 'Short Thai reason, especially when isFood is false.' },
-          name: { type: 'string', description: 'Thai food or drink name. Empty string when not food.' },
-          calories: { type: 'number', description: 'Estimated calories for one visible serving. Zero when not food.' },
-          protein: { type: 'number', description: 'Estimated protein grams for one visible serving. Zero when not food.' },
-          carbs: { type: 'number', description: 'Estimated carbohydrate grams for one visible serving. Zero when not food.' },
-          fat: { type: 'number', description: 'Estimated fat grams for one visible serving. Zero when not food.' },
-          confidence: { type: 'number', description: 'Confidence from 0 to 100.' },
-          note: { type: 'string', description: 'Short Thai nutrition note. Empty string when not food.' },
-        },
-        required: ['isFood', 'reason', 'name', 'calories', 'protein', 'carbs', 'fat', 'confidence', 'note'],
-      },
-    },
-  })
+  }
+}
 
-  let geminiResponse: Response | null = null
+async function requestQwenAnalysis(apiKey: string, requestBody: ReturnType<typeof buildQwenRequestBody>) {
+  let qwenResponse: Response | null = null
   let requestError: unknown = null
 
   for (const delay of [0, 800, 1600]) {
     if (delay > 0) await wait(delay)
 
     try {
-      geminiResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+      qwenResponse = await fetch(`${apiBaseUrl}/chat/completions`, {
         method: 'POST',
         headers: {
-          'x-goog-api-key': apiKey,
+          Authorization: `Bearer ${apiKey}`,
           'Content-Type': 'application/json',
         },
-        body: requestBody,
+        body: JSON.stringify(requestBody),
       })
       requestError = null
     } catch (error) {
@@ -164,29 +209,99 @@ export async function POST(request: Request) {
       continue
     }
 
-    if (!retryableStatuses.has(geminiResponse.status)) break
+    if (!retryableStatuses.has(qwenResponse.status)) break
   }
 
-  if (!geminiResponse) {
+  return { qwenResponse, requestError }
+}
+
+export async function POST(request: Request) {
+  const apiKey = process.env.QWEN_API_KEY
+  const model = process.env.QWEN_MODEL?.trim() || defaultQwenModel
+
+  if (!apiKey) {
+    return NextResponse.json(
+      { error: `ยังไม่ได้ตั้งค่า QWEN_API_KEY สำหรับวิเคราะห์ด้วย ${model}` },
+      { status: 500 },
+    )
+  }
+
+  const body = (await request.json().catch(() => null)) as { image?: unknown } | null
+  const imageResult = parseImageDataUrl(body?.image)
+
+  if ('error' in imageResult) {
+    return NextResponse.json(
+      { error: imageResult.error },
+      { status: 400 },
+    )
+  }
+
+  const { mimeType, imageData } = imageResult
+  const requestBody = buildQwenRequestBody(model, mimeType, imageData)
+  const { qwenResponse, requestError } = await requestQwenAnalysis(apiKey, requestBody)
+
+  if (!qwenResponse) {
     const message = requestError instanceof Error ? requestError.message : undefined
     return NextResponse.json({ error: friendlyModelError(message, model) }, { status: 502 })
   }
 
-  const payload = await geminiResponse.json().catch(() => null)
+  const rawBody = await qwenResponse.text().catch(() => '')
 
-  if (!geminiResponse.ok) {
+  logScanFoodDebug('Upstream response received', {
+    status: qwenResponse.status,
+    bodyLength: rawBody.length,
+  })
+
+  const { payload, streamedPayload } = parseQwenResponseBody(rawBody)
+
+  if (!payload) {
+    logScanFoodDebug('Failed to parse JSON from upstream response body')
+  }
+
+  if (!qwenResponse.ok) {
     const message =
       payload && typeof payload === 'object' && 'error' in payload
         ? (payload as { error?: { message?: string } }).error?.message
-        : undefined
-    return NextResponse.json({ error: friendlyModelError(message, model) }, { status: geminiResponse.status })
+        : rawBody.slice(0, 300) || undefined
+    return NextResponse.json({ error: friendlyModelError(message, model), status: qwenResponse.status }, { status: qwenResponse.status })
+  }
+
+  if (!payload) {
+    return NextResponse.json(
+      { error: `อ่านผลลัพธ์จาก ${model} ไม่สำเร็จ (response ไม่ใช่ JSON)` },
+      { status: 502 },
+    )
+  }
+
+  const content = streamedPayload?.content ?? extractContentFromPayload(payload)
+
+  logScanFoodDebug('Upstream payload parsed', {
+    payloadKeys: Object.keys(payload),
+    contentLength: content.length,
+  })
+
+  if (!content) {
+    logScanFoodDebug('Upstream payload content was empty', {
+      payloadKeys: Object.keys(payload),
+    })
+    return NextResponse.json(
+      { error: `อ่านผลลัพธ์จาก ${model} ไม่สำเร็จ (content ว่าง)`, payloadKeys: Object.keys(payload) },
+      { status: 502 },
+    )
   }
 
   try {
-    const text = extractOutputText(payload)
-    const parsed = JSON.parse(text) as Partial<FoodAnalysis>
+    const jsonStr = extractJsonFromContent(content)
+    const parsed = JSON.parse(jsonStr) as Partial<FoodAnalysis>
     return NextResponse.json(normalizeAnalysis(parsed))
-  } catch {
-    return NextResponse.json({ error: `อ่านผลลัพธ์จาก ${model} ไม่สำเร็จ` }, { status: 502 })
+  } catch (parseError) {
+    logScanFoodDebug('Failed to parse model content as FoodAnalysis JSON', {
+      error: String(parseError),
+      contentLength: content.length,
+    })
+    return NextResponse.json(
+      { error: `อ่านผลลัพธ์จาก ${model} ไม่สำเร็จ` },
+      { status: 502 },
+    )
   }
 }

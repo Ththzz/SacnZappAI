@@ -1,52 +1,70 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { CheckCircle2, Droplet, Droplets, Minus, Plus, Target, Trash2, Waves } from 'lucide-react'
-import { readWaterLogs, writeWaterLogs } from '@/lib/user-data'
+import { getLocalDateKey, readWaterLogs, writeWaterLogs, type WaterLogEntry } from '@/lib/user-data'
 
 const drinkOptions = [150, 250, 350, 500]
 const targetMl = 2000
 
-const initialLogs = [
-  { time: '07:00', amount: 250 },
-  { time: '09:30', amount: 350 },
-  { time: '11:00', amount: 150 },
-  { time: '13:00', amount: 250 },
-  { time: '15:30', amount: 500 },
-]
-
-const weekData = [
-  { day: 'จ', cups: 6 },
-  { day: 'อ', cups: 8 },
-  { day: 'พ', cups: 7 },
-  { day: 'พฤ', cups: 5 },
-  { day: 'ศ', cups: 6 },
-  { day: 'ส', cups: 7 },
-  { day: 'อา', cups: 5 },
-]
-
 const chartMaxCups = 10
 const chartHeight = 130
 
+function buildWaterWeekData(logs: WaterLogEntry[]) {
+  const dayLabels = ['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส']
+  const today = new Date()
+
+  return Array.from({ length: 7 }, (_, index) => {
+    const date = new Date(today)
+    date.setDate(today.getDate() - (6 - index))
+    const dateKey = getLocalDateKey(date)
+    const totalMl = logs
+      .filter((log) => log.date === dateKey)
+      .reduce((sum, log) => sum + log.amount, 0)
+
+    return {
+      date: dateKey,
+      day: dayLabels[date.getDay()],
+      cups: Math.round(totalMl / 250),
+      isToday: dateKey === getLocalDateKey(today),
+    }
+  })
+}
+
 export default function WaterTrackerClient() {
-  const [logs, setLogs] = useState(initialLogs)
+  const [logs, setLogs] = useState<WaterLogEntry[]>([])
   const [selectedAmount, setSelectedAmount] = useState(250)
+  const [loaded, setLoaded] = useState(false)
+  const todayKey = getLocalDateKey()
+  const todayLabel = new Intl.DateTimeFormat('th-TH', { day: 'numeric', month: 'long', year: 'numeric' }).format(new Date())
 
   useEffect(() => {
-    const stored = readWaterLogs()
-    if (stored.length > 0) {
-      setLogs(stored)
-    }
+    fetch('/api/water-logs')
+      .then(async (response) => {
+        const data = (await response.json().catch(() => ({}))) as { logs?: WaterLogEntry[] }
+        if (!response.ok) throw new Error('api')
+        setLogs(data.logs ?? [])
+      })
+      .catch(() => {
+        const stored = readWaterLogs()
+        if (stored.length > 0) setLogs(stored)
+      })
+      .finally(() => setLoaded(true))
   }, [])
 
   useEffect(() => {
+    if (!loaded) return
     writeWaterLogs(logs)
-  }, [logs])
+  }, [logs, loaded])
 
-  const totalMl = logs.reduce((sum, item) => sum + item.amount, 0)
+  const todayLogs = logs.filter((item) => item.date === todayKey)
+  const totalMl = todayLogs.reduce((sum, item) => sum + item.amount, 0)
   const cups = Math.round(totalMl / 250)
   const targetCups = Math.round(targetMl / 250)
+  const weekData = useMemo(() => buildWaterWeekData(logs), [logs])
+  const bestCups = Math.max(...weekData.map((item) => item.cups), 0)
+  const averageCups = Math.round((weekData.reduce((sum, item) => sum + item.cups, 0) / weekData.length) * 10) / 10
   const progress = Math.min(totalMl / targetMl, 1)
   const waterLevel = 34 + progress * 45
   const remainingCups = Math.max(targetCups - cups, 0)
@@ -59,60 +77,94 @@ export default function WaterTrackerClient() {
       hour12: false,
     })
 
+    const entry = {
+      id: crypto.randomUUID(),
+      date: todayKey,
+      time: nextTime,
+      amount: selectedAmount,
+    }
+
     setLogs((current) => [
       ...current,
-      {
-        time: nextTime,
-        amount: selectedAmount,
-      },
+      entry,
     ])
+
+    fetch('/api/water-logs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(entry),
+    }).catch(() => undefined)
   }
 
   const handleSubtractWater = () => {
+    const removedIds: string[] = []
+    const changedEntries: WaterLogEntry[] = []
+
     setLogs((current) => {
-      const remainingAmount = selectedAmount
-      let amountToRemove = remainingAmount
+      let amountToRemove = selectedAmount
       const nextLogs = [...current]
 
-      while (amountToRemove > 0 && nextLogs.length > 0) {
-        const lastIndex = nextLogs.length - 1
+      for (let lastIndex = nextLogs.length - 1; lastIndex >= 0 && amountToRemove > 0; lastIndex -= 1) {
         const lastEntry = nextLogs[lastIndex]
+        if (lastEntry.date !== todayKey) continue
 
         if (lastEntry.amount <= amountToRemove) {
           amountToRemove -= lastEntry.amount
-          nextLogs.pop()
+          if (lastEntry.id) removedIds.push(lastEntry.id)
+          nextLogs.splice(lastIndex, 1)
         } else {
-          nextLogs[lastIndex] = {
+          const changedEntry = {
             ...lastEntry,
             amount: lastEntry.amount - amountToRemove,
           }
+          nextLogs[lastIndex] = changedEntry
+          changedEntries.push(changedEntry)
           amountToRemove = 0
         }
       }
 
       return nextLogs
     })
+
+    removedIds.forEach((id) => {
+      fetch(`/api/water-logs/${id}`, { method: 'DELETE' }).catch(() => undefined)
+    })
+    changedEntries.forEach((entry) => {
+      if (!entry.id) return
+      fetch(`/api/water-logs/${entry.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ amount: entry.amount }),
+      }).catch(() => undefined)
+    })
   }
 
   const handleRemoveLog = (indexToRemove: number) => {
-    setLogs((current) => current.filter((_, index) => index !== indexToRemove))
+    const entryToRemove = todayLogs[indexToRemove]
+    setLogs((current) => {
+      let todayIndex = -1
+
+      return current.filter((entry) => {
+        if (entry.date !== todayKey) return true
+
+        todayIndex += 1
+        return todayIndex !== indexToRemove
+      })
+    })
+
+    if (entryToRemove?.id) {
+      fetch(`/api/water-logs/${entryToRemove.id}`, { method: 'DELETE' }).catch(() => undefined)
+    }
   }
 
   return (
     <div className="mx-auto max-w-6xl space-y-5 text-neutral-900">
-      <header className="flex flex-col gap-1">
-        <p className="text-sm font-medium text-neutral-400">Water Tracker</p>
-        <div className="flex flex-wrap items-end justify-between gap-3">
-          <div>
-            <h1 className="text-2xl font-bold tracking-normal">การดื่มน้ำ</h1>
-            <p className="text-sm text-neutral-500">วันที่ 11 พ.ค. 2026</p>
-          </div>
-          <div className="inline-flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-600">
-            <Droplets className="h-4 w-4" />
-            ScanZapp AI
-          </div>
+      <div className="flex justify-end">
+        <div className="inline-flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-600">
+          <Droplets className="h-4 w-4" />
+          ScanZapp AI · วันที่ {todayLabel}
         </div>
-      </header>
+      </div>
 
       <div className="grid items-start gap-5 lg:grid-cols-[minmax(320px,0.9fr)_minmax(420px,1.25fr)]">
         <section className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-black/5">
@@ -181,7 +233,12 @@ export default function WaterTrackerClient() {
               <div>
                 <h2 className="text-sm font-bold">บันทึกวันนี้</h2>
                 <div className="mt-3 space-y-2">
-                  {logs.map((entry, index) => (
+                  {todayLogs.length === 0 && (
+                    <div className="rounded-xl bg-neutral-50 px-3 py-2 text-xs font-medium text-neutral-400">
+                      ยังไม่มีรายการดื่มน้ำของวันนี้
+                    </div>
+                  )}
+                  {todayLogs.map((entry, index) => (
                     <div key={`${entry.time}-${index}`} className="grid grid-cols-[20px_1fr_auto_28px] items-center gap-2 text-xs">
                       <Droplet className="h-3.5 w-3.5 fill-blue-100 text-blue-500" />
                       <span className="font-medium text-neutral-500">{entry.time}</span>
@@ -206,8 +263,8 @@ export default function WaterTrackerClient() {
           <div className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-black/5">
             <h2 className="text-sm font-bold">สถิติการดื่มน้ำ</h2>
             <div className="mt-4 grid gap-3 sm:grid-cols-2">
-              <StatCard label="เฉลี่ย 7 วัน" value="6.2 แก้ว" valueClassName="text-blue-500" />
-              <StatCard label="ดีที่สุด" value="8 แก้ว" valueClassName="text-emerald-500" />
+              <StatCard label="เฉลี่ย 7 วัน" value={`${averageCups} แก้ว`} valueClassName="text-blue-500" />
+              <StatCard label="ดีที่สุด" value={`${bestCups} แก้ว`} valueClassName="text-emerald-500" />
               <StatCard label="วันนี้" value={`${cups} แก้ว`} valueClassName="text-orange-500" />
               <StatCard label="เป้าหมาย" value={`${targetCups} แก้ว`} valueClassName="text-neutral-700" />
             </div>
@@ -226,13 +283,12 @@ export default function WaterTrackerClient() {
                 />
                 <div className="relative z-10 flex h-full items-end justify-between gap-3">
                   {weekData.map((item) => {
-                    const isToday = item.day === 'อ'
                     return (
-                      <div key={item.day} className="flex min-w-0 flex-1 flex-col items-center">
+                      <div key={item.date} className="flex min-w-0 flex-1 flex-col items-center">
                         <span className="mb-2 text-[10px] font-bold text-blue-400">{item.cups}</span>
                         <div
-                          className={`w-full max-w-12 rounded-md ${isToday ? 'bg-emerald-400' : 'bg-blue-300'}`}
-                          style={{ height: `${(item.cups / chartMaxCups) * chartHeight}px` }}
+                          className={`w-full max-w-12 rounded-md ${item.isToday ? 'bg-emerald-400' : item.cups === 0 ? 'bg-neutral-200' : 'bg-blue-300'}`}
+                          style={{ height: `${item.cups === 0 ? 12 : (item.cups / chartMaxCups) * chartHeight}px` }}
                         />
                       </div>
                     )
@@ -242,7 +298,7 @@ export default function WaterTrackerClient() {
               <div className="mt-2 flex justify-between gap-3">
                 {weekData.map((item) => {
                   return (
-                    <span key={item.day} className="min-w-0 flex-1 text-center text-[11px] font-medium text-neutral-400">{item.day}</span>
+                    <span key={item.date} className="min-w-0 flex-1 text-center text-[11px] font-medium text-neutral-400">{item.day}</span>
                   )
                 })}
               </div>
@@ -307,4 +363,3 @@ function SmallInfo({
     </div>
   )
 }
-

@@ -2,6 +2,7 @@
 
 import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
+import { useEffect, useState } from "react"
 import Useritem from "../Useritem/Useritem"
 import {
   LayoutDashboard,
@@ -14,24 +15,35 @@ import {
   CameraIcon,
   Menu,
   Sprout,
+  ShieldCheck,
 } from "lucide-react"
 import { useSidebar } from "@/context/SidebarContext"
 
 const menuList = [
-  { link: '/', text: 'Dashboard', icon: LayoutDashboard },
-  { link: '/scan', text: 'Scan Food', icon: CameraIcon },
-  { link: '/meal-history', text: 'Meal History', icon: History },
-  { link: '/health-insight', text: 'Health Insight', icon: Lightbulb },
-  { link: '/water-tracker', text: 'Water Tracker', icon: Droplets },
-  { link: '/profile', text: 'Profile & Goals', icon: User },
-  { link: '/notifications', text: 'Notifications', icon: Bell },
-  { link: '/settings', text: 'Settings', icon: Settings },
+  { link: '/', text: 'แดชบอร์ด', icon: LayoutDashboard },
+  { link: '/scan', text: 'สแกนอาหาร', icon: CameraIcon },
+  { link: '/meal-history', text: 'ประวัติมื้ออาหาร', icon: History },
+  { link: '/health-insight', text: 'วิเคราะห์สุขภาพ', icon: Lightbulb },
+  { link: '/water-tracker', text: 'การดื่มน้ำ', icon: Droplets },
+  { link: '/profile', text: 'โปรไฟล์และเป้าหมาย', icon: User },
+  { link: '/notifications', text: 'ข้อความแจ้งเตือน', icon: Bell },
+  { link: '/settings', text: 'การตั้งค่า', icon: Settings },
 ]
 
 const Sidebar = () => {
   const pathname = usePathname()
   const router = useRouter()
   const { isSidebarOpen, setIsSidebarOpen } = useSidebar()
+  const [isAdmin, setIsAdmin] = useState(false)
+
+  useEffect(() => {
+    fetch("/api/auth/me")
+      .then((response) => response.json())
+      .then((data: { user?: { role?: string } | null }) => setIsAdmin(data.user?.role === "admin"))
+      .catch(() => undefined)
+  }, [])
+
+  const visibleMenuList = isAdmin ? [...menuList, { link: '/admin', text: 'แอดมิน', icon: ShieldCheck }] : menuList
 
   return (
     <div className={`fixed left-0 top-0 z-40 flex flex-col transition-none md:min-h-screen md:border-r md:bg-white md:transition-[width] md:duration-150 ${
@@ -47,7 +59,7 @@ const Sidebar = () => {
           className={`max-w-fit shrink-0 cursor-pointer rounded-full p-2 transition-none hover:bg-[#2EC78F]/10 md:transition-colors md:duration-150 md:hover:bg-[#05b474] ${
             isSidebarOpen ? "" : "md:bg-transparent"
           }`}
-          aria-label={isSidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'}
+          aria-label={isSidebarOpen ? 'ย่อเมนู' : 'ขยายเมนู'}
         >
           <Menu
             size={24}
@@ -69,7 +81,7 @@ const Sidebar = () => {
         isSidebarOpen ? "flex" : "hidden md:flex"
       }`}>
         <div className="flex flex-col gap-2">
-          {menuList.map((item) => {
+          {visibleMenuList.map((item) => {
             const Icon = item.icon
             const active = pathname === item.link
 

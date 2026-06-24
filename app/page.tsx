@@ -1,10 +1,11 @@
 import General from "@/components/Cards/General"
 
-const page = () => {
+const HomePage = () => {
   return (
     <div>
       <General />
     </div>
   )
 }
-export default page
+
+export default HomePage

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import {
   Activity,
   BadgeCheck,
@@ -13,6 +13,7 @@ import {
   Target,
   UserRound,
 } from "lucide-react"
+import { STORAGE_KEYS } from "@/lib/user-data"
 
 type GoalKey = "lean" | "maintain" | "cut"
 
@@ -26,10 +27,15 @@ type ProfileForm = {
   activity: string
 }
 
+type StoredProfile = {
+  selectedGoal?: GoalKey
+  form?: Partial<ProfileForm>
+}
+
 const goalOptions: { key: GoalKey; label: string; hint: string }[] = [
-  { key: "lean", label: "Lean Gain", hint: "เพิ่มกล้ามเนื้อแบบคุมไขมัน" },
-  { key: "maintain", label: "Maintain", hint: "รักษาน้ำหนักและบาลานซ์อาหาร" },
-  { key: "cut", label: "Cut", hint: "ลดไขมันแบบคงมวลกล้ามเนื้อ" },
+  { key: "lean", label: "เพิ่มกล้ามเนื้อ", hint: "เพิ่มกล้ามเนื้อแบบคุมไขมัน" },
+  { key: "maintain", label: "รักษาน้ำหนัก", hint: "รักษาน้ำหนักและบาลานซ์อาหาร" },
+  { key: "cut", label: "ลดไขมัน", hint: "ลดไขมันแบบคงมวลกล้ามเนื้อ" },
 ]
 
 const weeklyTargets = [
@@ -41,13 +47,14 @@ const weeklyTargets = [
 const bodyMetrics = [
   { label: "BMR", value: "1,650 kcal", helper: "พลังงานพื้นฐาน" },
   { label: "TDEE", value: "2,200 kcal", helper: "พลังงานต่อวัน" },
-  { label: "Body Fat", value: "21%", helper: "ประมาณการล่าสุด" },
+  { label: "ไขมันในร่างกาย", value: "21%", helper: "ประมาณการล่าสุด" },
   { label: "BMI", value: "21.5", helper: "อยู่ในเกณฑ์ปกติ" },
 ]
 
 export default function ProfileClient() {
   const [isEditing, setIsEditing] = useState(false)
   const [selectedGoal, setSelectedGoal] = useState<GoalKey>("lean")
+  const [notice, setNotice] = useState<string | null>(null)
   const [form, setForm] = useState<ProfileForm>({
     name: "Thanapol Thiwong",
     email: "aomsinthiwong@gmail.com",
@@ -58,37 +65,80 @@ export default function ProfileClient() {
     activity: "ออกกำลังกาย 4 วัน/สัปดาห์",
   })
 
+  useEffect(() => {
+    const applyStoredProfile = (stored: StoredProfile) => {
+      if (stored.selectedGoal && goalOptions.some((goal) => goal.key === stored.selectedGoal)) {
+        setSelectedGoal(stored.selectedGoal)
+      }
+      if (stored.form) {
+        setForm((current) => ({ ...current, ...stored.form }))
+      }
+    }
+
+    fetch("/api/profile")
+      .then(async (response) => {
+        const data = (await response.json().catch(() => ({}))) as { profile?: StoredProfile }
+        if (!response.ok) throw new Error("api")
+        if (data.profile) applyStoredProfile(data.profile)
+      })
+      .catch(() => {
+        try {
+          const raw = window.localStorage.getItem(STORAGE_KEYS.profile)
+          if (!raw) return
+          applyStoredProfile(JSON.parse(raw) as StoredProfile)
+        } catch {
+          window.localStorage.removeItem(STORAGE_KEYS.profile)
+        }
+      })
+  }, [])
+
   const handleFieldChange = (key: keyof ProfileForm, value: string) => {
     setForm((current) => ({ ...current, [key]: value }))
   }
 
+  const handleSaveProfile = () => {
+    window.localStorage.setItem(
+      STORAGE_KEYS.profile,
+      JSON.stringify({
+        selectedGoal,
+        form,
+      }),
+    )
+    fetch("/api/profile", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ selectedGoal, form }),
+    }).catch(() => undefined)
+    setNotice("บันทึกโปรไฟล์เรียบร้อยแล้ว")
+    setIsEditing(false)
+  }
+
   return (
     <div className="mx-auto max-w-7xl space-y-5 text-neutral-900">
-      <header className="flex flex-col gap-1">
-        <p className="text-sm font-medium text-neutral-400">05 · Profile & Goals</p>
-        <div className="flex flex-wrap items-end justify-between gap-3">
-          <div>
-            <h1 className="text-2xl font-bold tracking-normal">Profile & Goals</h1>
-            <p className="text-sm text-neutral-500">จัดการข้อมูลส่วนตัว เป้าหมาย และแผนโภชนาการของคุณ</p>
-          </div>
-          <button
-            type="button"
-            onClick={() => setIsEditing((current) => !current)}
-            className={`inline-flex h-11 items-center justify-center gap-2 rounded-full px-5 text-sm font-bold transition-colors ${
-              isEditing ? "bg-neutral-900 text-white hover:bg-neutral-800" : "bg-[#2EC78F] text-white hover:bg-[#05b474]"
-            }`}
-          >
-            <PencilLine className="h-4 w-4" />
-            {isEditing ? "ปิดการแก้ไข" : "แก้ไขโปรไฟล์"}
-          </button>
+      <div className="flex justify-end">
+        <button
+          type="button"
+          onClick={() => setIsEditing((current) => !current)}
+          className={`inline-flex h-11 items-center justify-center gap-2 rounded-full px-5 text-sm font-bold transition-colors ${
+            isEditing ? "bg-neutral-900 text-white hover:bg-neutral-800" : "bg-[#2EC78F] text-white hover:bg-[#05b474]"
+          }`}
+        >
+          <PencilLine className="h-4 w-4" />
+          {isEditing ? "ปิดการแก้ไข" : "แก้ไขโปรไฟล์"}
+        </button>
+      </div>
+
+      {notice && (
+        <div className="rounded-2xl bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-700">
+          {notice}
         </div>
-      </header>
+      )}
 
       <section className="grid gap-5 xl:grid-cols-[minmax(0,1.2fr)_360px]">
         <main className="space-y-5">
           <ProfileHero form={form} selectedGoal={selectedGoal} />
           <GoalSection selectedGoal={selectedGoal} onSelectGoal={setSelectedGoal} />
-          <ProfileFormCard form={form} isEditing={isEditing} onFieldChange={handleFieldChange} />
+          <ProfileFormCard form={form} isEditing={isEditing} onFieldChange={handleFieldChange} onSave={handleSaveProfile} />
         </main>
 
         <aside className="space-y-5">
@@ -190,10 +240,12 @@ function ProfileFormCard({
   form,
   isEditing,
   onFieldChange,
+  onSave,
 }: {
   form: ProfileForm
   isEditing: boolean
   onFieldChange: (key: keyof ProfileForm, value: string) => void
+  onSave: () => void
 }) {
   const fields: { key: keyof ProfileForm; label: string; type?: string }[] = [
     { key: "name", label: "ชื่อ" },
@@ -214,6 +266,7 @@ function ProfileFormCard({
         </div>
         <button
           type="button"
+          onClick={onSave}
           className="inline-flex h-10 items-center justify-center gap-2 rounded-full bg-[#2EC78F] px-4 text-sm font-bold text-white hover:bg-[#05b474]"
         >
           <Save className="h-4 w-4" />
@@ -272,7 +325,7 @@ function MetricsPanel() {
     <section className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-black/5">
       <div className="flex items-center gap-2">
         <Activity className="h-4 w-4 text-[#2EC78F]" />
-        <h2 className="text-base font-extrabold">Health Metrics</h2>
+        <h2 className="text-base font-extrabold">ตัวชี้วัดสุขภาพ</h2>
       </div>
       <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
         {bodyMetrics.map((metric) => (

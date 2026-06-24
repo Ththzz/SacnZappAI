@@ -1,18 +1,18 @@
+import type { Metadata } from "next"
 import { notifications } from "@/lib/notifications"
 import { Card, CardContent } from "@/components/ui/card"
+
+export const metadata: Metadata = {
+  title: "ข้อความแจ้งเตือน | ScanZapp AI",
+  description: "ดูการแจ้งเตือนโภชนาการและความคืบหน้าจาก ScanZapp AI",
+}
 
 export default function NotificationsPage() {
   const unreadCount = notifications.filter((item) => !item.read).length
 
   return (
     <div className="mx-auto max-w-4xl space-y-5 text-neutral-900">
-      <header className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <p className="text-sm font-medium text-neutral-400">Notifications</p>
-          <h1 className="text-2xl font-bold tracking-normal">ข้อความแจ้งเตือน</h1>
-          <p className="mt-1 text-sm text-neutral-500">ทั้งหมด {notifications.length} รายการ, ยังไม่อ่าน {unreadCount} รายการ</p>
-        </div>
-      </header>
+      <p className="text-sm text-neutral-500">ทั้งหมด {notifications.length} รายการ, ยังไม่อ่าน {unreadCount} รายการ</p>
 
       <div className="space-y-3">
         {notifications.map((item) => {
