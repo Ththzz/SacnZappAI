@@ -24,8 +24,9 @@ function LayoutFrame({ children, header }: { children: ReactNode; header: ReactN
 export default function LayoutClient({ children, header }: { children: ReactNode; header: ReactNode }) {
   const pathname = usePathname();
   const isAuthPage = pathname === "/sign-in" || pathname === "/sign-up";
+  const isAdminPage = pathname.startsWith("/admin");
 
-  if (isAuthPage) return <>{children}</>;
+  if (isAuthPage || isAdminPage) return <>{children}</>;
 
   return (
     <SidebarProvider>

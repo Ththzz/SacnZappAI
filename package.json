@@ -7,9 +7,13 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "vitest run"
+    "test": "vitest run",
+    "db:migrate": "node scripts/db-migrate.mjs && prisma generate",
+    "db:generate": "prisma generate",
+    "db:seed": "npm run db:migrate && node scripts/db-seed.mjs"
   },
   "dependencies": {
+    "@prisma/client": "6.19.3",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
@@ -32,6 +36,7 @@
     "eslint": "^9",
     "eslint-config-next": "^15.5.19",
     "jsdom": "^29.1.1",
+    "prisma": "6.19.3",
     "tailwindcss": "^4",
     "typescript": "^5",
     "vitest": "^4.1.9"

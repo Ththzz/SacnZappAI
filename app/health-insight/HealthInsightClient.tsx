@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useState } from "react"
 import {
   Beef,
   Bot,
@@ -34,6 +34,7 @@ type MealSuggestion = {
   name: string
   caloriesDelta: number
   protein: number
+  reason?: string
 }
 
 type MacroBalanceItem = {
@@ -41,15 +42,20 @@ type MacroBalanceItem = {
   value: string
 }
 
-const calorieGoal = 1800
-const chartMaxCalories = 2200
 const chartHeight = 150
 
-const mealSuggestions: MealSuggestion[] = [
-  { id: "egg-rice", name: "ไข่เจียว + สลัดผัก + ข้าวกล้อง", caloriesDelta: 420, protein: 32 },
-  { id: "yogurt", name: "โยเกิร์ตกรีก + ผลไม้สด", caloriesDelta: 220, protein: 18 },
-  { id: "salmon", name: "ปลาแซลมอนนึ่ง + ผักอบ", caloriesDelta: 380, protein: 28 },
-]
+type SettingsPayload = {
+  settings?: {
+    healthGoal?: {
+      dailyCalories?: number
+    }
+  } | null
+}
+
+function getCalorieGoal(payload: SettingsPayload): number | null {
+  const calories = Number(payload.settings?.healthGoal?.dailyCalories)
+  return Number.isFinite(calories) && calories > 0 ? Math.round(calories) : null
+}
 
 const defaultMacroBalance: MacroBalanceItem[] = [
   { label: "คาร์บ", value: "0%" },
@@ -57,7 +63,7 @@ const defaultMacroBalance: MacroBalanceItem[] = [
   { label: "ไขมัน", value: "0%" },
 ]
 
-function buildCalorieTrend(meals: MealEntry[]): CalorieTrendPoint[] {
+function buildCalorieTrend(meals: MealEntry[], calorieGoal: number | null): CalorieTrendPoint[] {
   const byDate = new Map<string, number>()
   meals.forEach((meal) => {
     byDate.set(meal.date, (byDate.get(meal.date) ?? 0) + meal.calories)
@@ -73,7 +79,7 @@ function buildCalorieTrend(meals: MealEntry[]): CalorieTrendPoint[] {
       return {
         day: dayLabels[day],
         calories,
-        status: calories > calorieGoal ? "over" as const : "good" as const,
+        status: calorieGoal && calories > calorieGoal ? "over" as const : "good" as const,
       }
     })
 }
@@ -98,53 +104,88 @@ export default function HealthInsightClient() {
   const [calorieTrend, setCalorieTrend] = useState<CalorieTrendPoint[]>([])
   const [foodAlerts, setFoodAlerts] = useState<FoodAlert[]>([])
   const [macroBalance, setMacroBalance] = useState<MacroBalanceItem[]>(defaultMacroBalance)
+  const [mealSuggestions, setMealSuggestions] = useState<MealSuggestion[]>([])
+  const [suggestionSource, setSuggestionSource] = useState("")
   const [mealCount, setMealCount] = useState(0)
+  const [calorieGoal, setCalorieGoal] = useState<number | null>(null)
 
   const savedCount = savedMealIds.length
-  const targetLineBottom = useMemo(() => (calorieGoal / chartMaxCalories) * chartHeight, [])
 
   useEffect(() => {
-    const meals = readMealEntries()
-    const waterLogs = readWaterLogs()
-    const todayKey = getLocalDateKey()
-    const todayWaterMl = waterLogs
-      .filter((log) => log.date === todayKey)
-      .reduce((sum, log) => sum + log.amount, 0)
+    async function loadInsightData() {
+      const [mealResult, waterResult, suggestionResult, settingsResult] = await Promise.allSettled([
+        fetch("/api/meals").then(async (response) => {
+          const data = (await response.json().catch(() => ({}))) as { meals?: MealEntry[] }
+          if (!response.ok) throw new Error("meals")
+          return data.meals ?? []
+        }),
+        fetch("/api/water-logs").then(async (response) => {
+          const data = (await response.json().catch(() => ({}))) as { logs?: ReturnType<typeof readWaterLogs> }
+          if (!response.ok) throw new Error("water")
+          return data.logs ?? []
+        }),
+        fetch("/api/meal-suggestions").then(async (response) => {
+          const data = (await response.json().catch(() => ({}))) as { suggestions?: MealSuggestion[]; source?: string }
+          if (!response.ok) throw new Error("suggestions")
+          return data
+        }),
+        fetch("/api/settings").then(async (response) => {
+          const data = (await response.json().catch(() => ({}))) as SettingsPayload
+          if (!response.ok) throw new Error("settings")
+          return getCalorieGoal(data)
+        }),
+      ])
 
-    setMealCount(meals.length)
-    setCalorieTrend(buildCalorieTrend(meals))
-    setMacroBalance(buildMacroBalance(meals))
+      const meals = mealResult.status === "fulfilled" ? mealResult.value : readMealEntries()
+      const waterLogs = waterResult.status === "fulfilled" ? waterResult.value : readWaterLogs()
+      const suggestions = suggestionResult.status === "fulfilled" ? suggestionResult.value.suggestions ?? [] : []
+      const source = suggestionResult.status === "fulfilled" ? suggestionResult.value.source ?? "" : ""
+      const goal = settingsResult.status === "fulfilled" ? settingsResult.value : null
+      const todayKey = getLocalDateKey()
+      const todayWaterMl = waterLogs
+        .filter((log) => log.date === todayKey)
+        .reduce((sum, log) => sum + log.amount, 0)
 
-    if (meals.length === 0 && todayWaterMl === 0) {
-      setFoodAlerts([])
-      return
-    }
+      setMealCount(meals.length)
+      setCalorieGoal(goal)
+      setCalorieTrend(buildCalorieTrend(meals, goal))
+      setMacroBalance(buildMacroBalance(meals))
+      setMealSuggestions(suggestions)
+      setSuggestionSource(source)
 
-    const alerts: FoodAlert[] = []
-    const totalProtein = meals.reduce((sum, meal) => sum + meal.protein, 0)
-    const avgProtein = meals.length > 0 ? totalProtein / meals.length : 0
+      if (meals.length === 0 && todayWaterMl === 0) {
+        setFoodAlerts([])
+        return
+      }
 
-    if (meals.length > 0) {
+      const alerts: FoodAlert[] = []
+      const totalProtein = meals.reduce((sum, meal) => sum + meal.protein, 0)
+      const avgProtein = meals.length > 0 ? totalProtein / meals.length : 0
+
+      if (meals.length > 0) {
+        alerts.push({
+          id: "protein",
+          icon: Beef,
+          title: "โปรตีน",
+          description: avgProtein < 20 ? "โปรตีนเฉลี่ยต่อมื้อยังต่ำกว่าเป้าหมาย" : "โปรตีนอยู่ในเกณฑ์ดีจากข้อมูลที่บันทึก",
+          colorClass: avgProtein < 20 ? "bg-rose-50" : "bg-emerald-50",
+          iconClass: avgProtein < 20 ? "text-red-500" : "text-emerald-500",
+        })
+      }
+
       alerts.push({
-        id: "protein",
-        icon: Beef,
-        title: "โปรตีน",
-        description: avgProtein < 20 ? "ต่ำกว่าเป้าหมายเฉลี่ยต่อมื้อ ลองเพิ่มไข่หรือปลา" : "โปรตีนอยู่ในเกณฑ์ดี รักษาความสม่ำเสมอ",
-        colorClass: avgProtein < 20 ? "bg-rose-50" : "bg-emerald-50",
-        iconClass: avgProtein < 20 ? "text-red-500" : "text-emerald-500",
+        id: "water",
+        icon: Droplets,
+        title: "น้ำ",
+        description: todayWaterMl > 0 ? `วันนี้บันทึกน้ำแล้ว ${todayWaterMl.toLocaleString()} ml` : "ยังไม่มีข้อมูลน้ำดื่มวันนี้",
+        colorClass: todayWaterMl > 0 ? "bg-emerald-50" : "bg-sky-50",
+        iconClass: todayWaterMl > 0 ? "text-emerald-500" : "text-sky-500",
       })
+
+      setFoodAlerts(alerts)
     }
 
-    alerts.push({
-      id: "water",
-      icon: Droplets,
-      title: "น้ำ",
-      description: todayWaterMl >= 2000 ? "ดื่มน้ำครบเป้าหมายวันนี้แล้ว" : `วันนี้ยังขาดน้ำอีก ${Math.ceil((2000 - todayWaterMl) / 250)} แก้ว`,
-      colorClass: todayWaterMl >= 2000 ? "bg-emerald-50" : "bg-sky-50",
-      iconClass: todayWaterMl >= 2000 ? "text-emerald-500" : "text-sky-500",
-    })
-
-    setFoodAlerts(alerts)
+    loadInsightData()
   }, [])
 
   const handleSaveMeal = (mealId: string) => {
@@ -161,8 +202,8 @@ export default function HealthInsightClient() {
 
       <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
         <main className="space-y-5">
-          <CalorieTrendCard targetLineBottom={targetLineBottom} calorieTrend={calorieTrend} />
-          <MealSuggestionsCard savedMealIds={savedMealIds} macroBalance={macroBalance} onSaveMeal={handleSaveMeal} />
+          <CalorieTrendCard calorieGoal={calorieGoal} calorieTrend={calorieTrend} />
+          <MealSuggestionsCard savedMealIds={savedMealIds} macroBalance={macroBalance} mealSuggestions={mealSuggestions} suggestionSource={suggestionSource} onSaveMeal={handleSaveMeal} />
         </main>
 
         <FoodAlertsPanel foodAlerts={foodAlerts} />
@@ -194,13 +235,18 @@ function InsightBanner({ savedCount, mealCount }: { savedCount: number; mealCoun
   )
 }
 
-function CalorieTrendCard({ targetLineBottom, calorieTrend }: { targetLineBottom: number; calorieTrend: CalorieTrendPoint[] }) {
+function CalorieTrendCard({ calorieGoal, calorieTrend }: { calorieGoal: number | null; calorieTrend: CalorieTrendPoint[] }) {
+  const maxCalories = Math.max(calorieGoal ? calorieGoal * 1.25 : 0, ...calorieTrend.map((item) => item.calories), 1)
+  const targetLineBottom = calorieGoal ? (calorieGoal / maxCalories) * chartHeight : null
+
   return (
     <section className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-black/5">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 className="text-base font-extrabold">แนวโน้มแคลอรี่ 7 วัน</h2>
-          <p className="mt-1 text-xs font-semibold text-neutral-400">เป้าหมาย 1,800 kcal</p>
+          <p className="mt-1 text-xs font-semibold text-neutral-400">
+            {calorieGoal ? `เป้าหมาย ${calorieGoal.toLocaleString()} kcal` : "ยังไม่มีเป้าหมายแคลอรี่"}
+          </p>
         </div>
         <span className="rounded-full bg-orange-50 px-4 py-1 text-xs font-bold text-orange-500">
           {calorieTrend.some((item) => item.status === "over") ? "มีวันที่เกิน" : "อยู่ในเป้า"}
@@ -214,13 +260,15 @@ function CalorieTrendCard({ targetLineBottom, calorieTrend }: { targetLineBottom
           </div>
         )}
         {calorieTrend.length > 0 && <div className="relative h-[150px]">
-          <div className="absolute inset-x-0 border-t border-orange-300" style={{ bottom: `${targetLineBottom}px` }} />
+          {targetLineBottom !== null && (
+            <div className="absolute inset-x-0 border-t border-orange-300" style={{ bottom: `${targetLineBottom}px` }} />
+          )}
           <div className="relative z-10 flex h-full items-end justify-between gap-4">
             {calorieTrend.map((item) => (
               <div key={item.day} className="flex min-w-0 flex-1 flex-col items-center">
                 <div
                   className={`w-full max-w-14 rounded-md ${item.status === "over" ? "bg-orange-400" : "bg-[#2EC78F]"}`}
-                  style={{ height: `${Math.max(48, (item.calories / chartMaxCalories) * chartHeight)}px` }}
+                  style={{ height: `${Math.max(48, (item.calories / maxCalories) * chartHeight)}px` }}
                   aria-label={`${item.day} ${item.calories} kcal`}
                 />
               </div>
@@ -269,10 +317,14 @@ function FoodAlertsPanel({ foodAlerts }: { foodAlerts: FoodAlert[] }) {
 function MealSuggestionsCard({
   savedMealIds,
   macroBalance,
+  mealSuggestions,
+  suggestionSource,
   onSaveMeal,
 }: {
   savedMealIds: string[]
   macroBalance: MacroBalanceItem[]
+  mealSuggestions: MealSuggestion[]
+  suggestionSource: string
   onSaveMeal: (mealId: string) => void
 }) {
   return (
@@ -292,6 +344,13 @@ function MealSuggestionsCard({
       </div>
 
       <div className="mt-4 space-y-3">
+        {mealSuggestions.length === 0 && (
+          <div className="rounded-xl bg-neutral-50 p-4 text-sm font-semibold text-neutral-500">
+            {suggestionSource === "missing-api-key"
+              ? "ยังไม่ได้ตั้งค่า QWEN_API_KEY สำหรับสร้างคำแนะนำด้วย AI"
+              : "ยังไม่มีคำแนะนำจาก AI เพราะข้อมูลมื้ออาหารยังไม่เพียงพอ"}
+          </div>
+        )}
         {mealSuggestions.map((meal) => {
           const isSaved = savedMealIds.includes(meal.id)
           return (
@@ -300,6 +359,7 @@ function MealSuggestionsCard({
                 <h3 className="text-sm font-extrabold">{meal.name}</h3>
                 <p className="mt-2 text-xs font-semibold text-orange-400">+{meal.caloriesDelta} kcal</p>
                 <p className="text-xs font-semibold text-[#2EC78F]">โปรตีน {meal.protein}g</p>
+                {meal.reason && <p className="mt-1 text-xs font-medium leading-5 text-neutral-500">{meal.reason}</p>}
               </div>
               <button
                 type="button"

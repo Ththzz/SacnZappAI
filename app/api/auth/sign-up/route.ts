@@ -18,7 +18,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "รหัสสมัครแอดมินไม่ถูกต้อง" }, { status: 403 })
     }
 
-    const result = createUser({ name, email, password, role: role as UserRole })
+    const result = await createUser({ name, email, password, role: role as UserRole })
     if (!result) return NextResponse.json({ error: "สมัครสมาชิกไม่สำเร็จ" }, { status: 500 })
 
     await createSession(result.user.id)

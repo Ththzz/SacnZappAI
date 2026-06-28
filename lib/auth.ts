@@ -1,6 +1,6 @@
 import { pbkdf2Sync, randomBytes, randomUUID, timingSafeEqual, createHash } from "node:crypto"
 import { cookies } from "next/headers"
-import { getDb, nowIso } from "@/lib/db"
+import { prisma } from "@/lib/db"
 
 export type UserRole = "user" | "admin"
 
@@ -12,17 +12,13 @@ export type AuthUser = {
   createdAt: string
 }
 
-type UserRow = {
+type UserRecord = {
   id: string
   name: string
   email: string
-  password_hash: string
+  passwordHash: string
   role: UserRole
-  created_at: string
-}
-
-type SessionUserRow = UserRow & {
-  expires_at: string
+  createdAt: Date
 }
 
 export const sessionCookieName = "scanzapp_session"
@@ -30,13 +26,13 @@ export const sessionCookieName = "scanzapp_session"
 const passwordIterations = 210_000
 const sessionDays = 30
 
-function toUser(row: UserRow): AuthUser {
+function toUser(row: UserRecord): AuthUser {
   return {
     id: row.id,
     name: row.name,
     email: row.email,
     role: row.role,
-    createdAt: row.created_at,
+    createdAt: row.createdAt.toISOString(),
   }
 }
 
@@ -66,37 +62,42 @@ function hashToken(token: string) {
   return createHash("sha256").update(token).digest("hex")
 }
 
-export function createUser(input: { name: string; email: string; password: string; role: UserRole }) {
-  const db = getDb()
-  const id = randomUUID()
-  const timestamp = nowIso()
+export async function createUser(input: { name: string; email: string; password: string; role: UserRole }) {
   const email = normalizeEmail(input.email)
 
-  db.prepare(`
-    INSERT INTO users (id, name, email, password_hash, role, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).run(id, input.name.trim(), email, hashPassword(input.password), input.role, timestamp, timestamp)
+  const user = await prisma.user.create({
+    data: {
+      id: randomUUID(),
+      name: input.name.trim(),
+      email,
+      passwordHash: hashPassword(input.password),
+      role: input.role,
+    },
+  })
 
-  return getUserByEmail(email)
+  return { user: toUser(user), passwordHash: user.passwordHash }
 }
 
-export function getUserByEmail(email: string) {
-  const row = getDb()
-    .prepare("SELECT id, name, email, password_hash, role, created_at FROM users WHERE email = ?")
-    .get(normalizeEmail(email)) as UserRow | undefined
+export async function getUserByEmail(email: string) {
+  const row = await prisma.user.findUnique({
+    where: { email: normalizeEmail(email) },
+  })
 
-  return row ? { user: toUser(row), passwordHash: row.password_hash } : null
+  return row ? { user: toUser(row), passwordHash: row.passwordHash } : null
 }
 
 export async function createSession(userId: string) {
   const token = randomBytes(32).toString("base64url")
-  const timestamp = nowIso()
   const expiresAt = new Date(Date.now() + sessionDays * 24 * 60 * 60 * 1000)
 
-  getDb().prepare(`
-    INSERT INTO sessions (id, user_id, token_hash, expires_at, created_at)
-    VALUES (?, ?, ?, ?, ?)
-  `).run(randomUUID(), userId, hashToken(token), expiresAt.toISOString(), timestamp)
+  await prisma.session.create({
+    data: {
+      id: randomUUID(),
+      userId,
+      tokenHash: hashToken(token),
+      expiresAt,
+    },
+  })
 
   const cookieStore = await cookies()
   cookieStore.set(sessionCookieName, token, {
@@ -113,7 +114,7 @@ export async function destroySession() {
   const token = cookieStore.get(sessionCookieName)?.value
 
   if (token) {
-    getDb().prepare("DELETE FROM sessions WHERE token_hash = ?").run(hashToken(token))
+    await prisma.session.deleteMany({ where: { tokenHash: hashToken(token) } })
   }
 
   cookieStore.delete(sessionCookieName)
@@ -123,21 +124,19 @@ export async function getCurrentUser() {
   const token = (await cookies()).get(sessionCookieName)?.value
   if (!token) return null
 
-  const row = getDb().prepare(`
-    SELECT users.id, users.name, users.email, users.password_hash, users.role, users.created_at, sessions.expires_at
-    FROM sessions
-    JOIN users ON users.id = sessions.user_id
-    WHERE sessions.token_hash = ?
-  `).get(hashToken(token)) as SessionUserRow | undefined
+  const row = await prisma.session.findUnique({
+    where: { tokenHash: hashToken(token) },
+    include: { user: true },
+  })
 
   if (!row) return null
 
-  if (Date.parse(row.expires_at) <= Date.now()) {
-    getDb().prepare("DELETE FROM sessions WHERE token_hash = ?").run(hashToken(token))
+  if (row.expiresAt.getTime() <= Date.now()) {
+    await prisma.session.deleteMany({ where: { tokenHash: hashToken(token) } })
     return null
   }
 
-  return toUser(row)
+  return toUser(row.user)
 }
 
 export async function requireUser() {

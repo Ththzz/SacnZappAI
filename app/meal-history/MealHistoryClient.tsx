@@ -6,10 +6,12 @@ import {
   ArrowLeft,
   ArrowRight,
   Check,
-  ChevronRight,
   Clock,
   Download,
   Flame,
+  PencilLine,
+  Plus,
+  Save,
   Scale,
   Trash2,
   Trophy,
@@ -51,13 +53,48 @@ type MonthDaySummary = {
   isToday: boolean
 }
 
-const macroRows = [
-  { label: "โปรตีน", current: 56, target: 72, color: "bg-emerald-400" },
-  { label: "คาร์โบไฮเดรต", current: 142, target: 200, color: "bg-blue-500" },
-  { label: "ไขมัน", current: 38, target: 55, color: "bg-orange-400" },
-]
+type NutritionTargets = {
+  calories: number
+  protein: number
+  carbs: number
+  fat: number
+}
 
-function buildWeekDays(meals: DayMeal[]): WeekDaySummary[] {
+type AppSettingsPayload = {
+  settings?: {
+    healthGoal?: {
+      dailyCalories?: number
+      currentWeightKg?: number
+    }
+  } | null
+}
+
+function getCalorieStatus(calories: number, targetCalories?: number): WeekDaySummary["status"] {
+  if (calories === 0) return "empty"
+  if (!targetCalories || targetCalories <= 0) return "good"
+  if (calories > targetCalories * 1.2) return "bad"
+  if (calories > targetCalories) return "warn"
+  return "good"
+}
+
+function deriveTargets(payload: AppSettingsPayload): NutritionTargets | null {
+  const dailyCalories = Number(payload.settings?.healthGoal?.dailyCalories)
+  const weightKg = Number(payload.settings?.healthGoal?.currentWeightKg)
+  if (!Number.isFinite(dailyCalories) || dailyCalories <= 0) return null
+
+  const protein = Number.isFinite(weightKg) && weightKg > 0 ? Math.round(weightKg * 1.9) : 0
+  const fat = Number.isFinite(weightKg) && weightKg > 0 ? Math.round(weightKg * 0.85) : 0
+  const caloriesForCarbs = dailyCalories - protein * 4 - fat * 9
+
+  return {
+    calories: Math.round(dailyCalories),
+    protein,
+    fat,
+    carbs: protein > 0 && fat > 0 ? Math.max(0, Math.round(caloriesForCarbs / 4)) : 0,
+  }
+}
+
+function buildWeekDays(meals: DayMeal[], targetCalories?: number): WeekDaySummary[] {
   const dayLabels = ["อา", "จ", "อ", "พ", "พฤ", "ศ", "ส"]
   const fullDayLabels = ["อาทิตย์", "จันทร์", "อังคาร", "พุธ", "พฤหัส", "ศุกร์", "เสาร์"]
   const formatter = new Intl.DateTimeFormat("th-TH", { day: "numeric", month: "short" })
@@ -69,8 +106,7 @@ function buildWeekDays(meals: DayMeal[]): WeekDaySummary[] {
     const dateKey = getLocalDateKey(date)
     const dayMeals = meals.filter((meal) => meal.date === dateKey)
     const calories = dayMeals.reduce((sum, meal) => sum + meal.calories, 0)
-    const status: WeekDaySummary["status"] =
-      calories === 0 ? "empty" : calories > 2200 ? "bad" : calories > 1800 ? "warn" : "good"
+    const status = getCalorieStatus(calories, targetCalories)
 
     return {
       day: dayLabels[date.getDay()],
@@ -86,7 +122,7 @@ function getCurrentMonthLabel() {
   return new Intl.DateTimeFormat("th-TH", { month: "long", year: "numeric" }).format(new Date())
 }
 
-function buildMonthDays(meals: DayMeal[]): MonthDaySummary[] {
+function buildMonthDays(meals: DayMeal[], targetCalories?: number): MonthDaySummary[] {
   const today = new Date()
   const year = today.getFullYear()
   const month = today.getMonth()
@@ -98,8 +134,7 @@ function buildMonthDays(meals: DayMeal[]): MonthDaySummary[] {
     const dateKey = getLocalDateKey(date)
     const dayMeals = meals.filter((meal) => meal.date === dateKey)
     const calories = dayMeals.reduce((sum, meal) => sum + meal.calories, 0)
-    const status: MonthDaySummary["status"] =
-      calories === 0 ? "empty" : calories > 2200 ? "bad" : calories > 1800 ? "warn" : "good"
+    const status = getCalorieStatus(calories, targetCalories)
 
     return {
       day: index + 1,
@@ -115,6 +150,8 @@ export default function MealHistoryClient() {
   const [activeView, setActiveView] = useState<ViewMode>("day")
   const [selectedMeal, setSelectedMeal] = useState<DayMeal | null>(null)
   const [historyMeals, setHistoryMeals] = useState<DayMeal[]>([])
+  const [addingMeal, setAddingMeal] = useState(false)
+  const [targets, setTargets] = useState<NutritionTargets | null>(null)
   const todayKey = getLocalDateKey()
 
   useEffect(() => {
@@ -134,32 +171,101 @@ export default function MealHistoryClient() {
       note: item.note,
     }))
 
-    fetch("/api/meals")
-      .then(async (response) => {
+    Promise.allSettled([
+      fetch("/api/meals").then(async (response) => {
         const data = (await response.json().catch(() => ({}))) as { meals?: ReturnType<typeof readMealEntries> }
         if (!response.ok) throw new Error("api")
-        setHistoryMeals(convertMeals(data.meals ?? []))
-      })
-      .catch(() => setHistoryMeals(convertMeals(readMealEntries())))
+        return data.meals ?? []
+      }),
+      fetch("/api/settings").then(async (response) => {
+        const data = (await response.json().catch(() => ({}))) as AppSettingsPayload
+        if (!response.ok) throw new Error("settings")
+        return data
+      }),
+    ]).then(([mealResult, settingsResult]) => {
+      const loadedMeals = mealResult.status === "fulfilled" ? mealResult.value : readMealEntries()
+      setHistoryMeals(convertMeals(loadedMeals))
+      setTargets(settingsResult.status === "fulfilled" ? deriveTargets(settingsResult.value) : null)
+    })
   }, [])
 
   const todayMeals = historyMeals.filter((meal) => meal.date === todayKey)
   const dailyCalories = todayMeals.reduce((total, meal) => total + meal.calories, 0)
-  const weekDays = useMemo(() => buildWeekDays(historyMeals), [historyMeals])
-  const monthDays = useMemo(() => buildMonthDays(historyMeals), [historyMeals])
+  const weekDays = useMemo(() => buildWeekDays(historyMeals, targets?.calories), [historyMeals, targets])
+  const monthDays = useMemo(() => buildMonthDays(historyMeals, targets?.calories), [historyMeals, targets])
   const weeklyCalories = weekDays.reduce((total, day) => total + day.calories, 0)
   const daysWithMeals = weekDays.filter((day) => day.meals > 0).length
   const averageCalories = daysWithMeals > 0 ? Math.round(weeklyCalories / daysWithMeals) : 0
 
+  const handleDeleteMeal = async (mealId: string) => {
+    setHistoryMeals((current) => current.filter((meal) => meal.id !== mealId))
+    if (selectedMeal?.id === mealId) setSelectedMeal(null)
+    await fetch(`/api/meals/${mealId}`, { method: "DELETE" }).catch(() => undefined)
+  }
+
+  const handleUpdateMeal = async (updatedMeal: DayMeal) => {
+    setHistoryMeals((current) => current.map((meal) => (meal.id === updatedMeal.id ? updatedMeal : meal)))
+    setSelectedMeal(updatedMeal)
+    await fetch(`/api/meals/${updatedMeal.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: updatedMeal.name,
+        calories: updatedMeal.calories,
+        protein: updatedMeal.protein ?? 0,
+        carbs: updatedMeal.carbs ?? 0,
+        fat: updatedMeal.fat ?? 0,
+        time: updatedMeal.time,
+        date: updatedMeal.date,
+        source: updatedMeal.source ?? "scan",
+        confidence: updatedMeal.confidence,
+        note: updatedMeal.note,
+      }),
+    }).catch(() => undefined)
+  }
+
+  const handleAddManualMeal = async (meal: DayMeal) => {
+    setHistoryMeals((current) => [meal, ...current])
+    setAddingMeal(false)
+    await fetch("/api/meals", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id: meal.id,
+        name: meal.name,
+        calories: meal.calories,
+        protein: meal.protein ?? 0,
+        carbs: meal.carbs ?? 0,
+        fat: meal.fat ?? 0,
+        time: meal.time,
+        date: meal.date,
+        source: "manual",
+        confidence: meal.confidence,
+        note: meal.note,
+      }),
+    }).catch(() => undefined)
+  }
+
   return (
     <div className="mx-auto max-w-7xl space-y-5 text-neutral-900">
-      <ViewTabs activeView={activeView} onChange={setActiveView} />
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <ViewTabs activeView={activeView} onChange={setActiveView} />
+        <button
+          type="button"
+          onClick={() => setAddingMeal(true)}
+          className="inline-flex h-10 items-center justify-center gap-2 rounded-full bg-emerald-600 px-4 text-sm font-bold text-white hover:bg-emerald-700"
+        >
+          <Plus className="h-4 w-4" />
+          เพิ่มมื้อเอง
+        </button>
+      </div>
 
-      {activeView === "day" && <DailyView meals={todayMeals} dailyCalories={dailyCalories} onSelectMeal={setSelectedMeal} />}
-      {activeView === "week" && <WeeklyView averageCalories={averageCalories} weekDays={weekDays} />}
-      {activeView === "month" && <MonthlyView monthDays={monthDays} />}
+      {activeView === "day" && <DailyView meals={todayMeals} dailyCalories={dailyCalories} targets={targets} onSelectMeal={setSelectedMeal} onDeleteMeal={handleDeleteMeal} />}
+      {activeView === "week" && <WeeklyView averageCalories={averageCalories} weekDays={weekDays} targetCalories={targets?.calories} />}
+      {activeView === "month" && <MonthlyView monthDays={monthDays} targetCalories={targets?.calories} />}
 
-      {selectedMeal && <MealDetailModal meal={selectedMeal} onClose={() => setSelectedMeal(null)} />}
+      {selectedMeal && <MealDetailModal meal={selectedMeal} onClose={() => setSelectedMeal(null)} onDelete={handleDeleteMeal} onUpdate={handleUpdateMeal} />}
+      {addingMeal && <ManualMealModal onClose={() => setAddingMeal(false)} onAdd={handleAddManualMeal} />}
     </div>
   )
 }
@@ -189,8 +295,26 @@ function ViewTabs({ activeView, onChange }: { activeView: ViewMode; onChange: (v
   )
 }
 
-function DailyView({ meals, dailyCalories, onSelectMeal }: { meals: DayMeal[]; dailyCalories: number; onSelectMeal: (meal: DayMeal) => void }) {
-  const percent = Math.round((dailyCalories / 1800) * 100)
+function DailyView({
+  meals,
+  dailyCalories,
+  targets,
+  onSelectMeal,
+  onDeleteMeal,
+}: {
+  meals: DayMeal[]
+  dailyCalories: number
+  targets: NutritionTargets | null
+  onSelectMeal: (meal: DayMeal) => void
+  onDeleteMeal: (mealId: string) => void
+}) {
+  const percent = targets?.calories ? Math.round((dailyCalories / targets.calories) * 100) : null
+  const totalProtein = meals.reduce((sum, meal) => sum + (meal.protein ?? 0), 0)
+  const advice = meals.length === 0
+    ? "ยังไม่มีข้อมูลมื้ออาหารสำหรับสร้างข้อเสนอแนะ"
+    : targets?.protein && totalProtein < targets.protein
+      ? "โปรตีนวันนี้ยังต่ำกว่าเป้าหมายที่ตั้งไว้ ลองเพิ่มแหล่งโปรตีนในมื้อถัดไป"
+      : "สรุปนี้คำนวณจากมื้ออาหารที่คุณบันทึกจริงในวันนี้"
 
   return (
     <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
@@ -202,11 +326,13 @@ function DailyView({ meals, dailyCalories, onSelectMeal }: { meals: DayMeal[]; d
                 <h2 className="text-base font-extrabold">วันนี้</h2>
                 <p className="text-sm text-neutral-500">รวม {dailyCalories.toLocaleString()} kcal จาก {meals.length} มื้อ</p>
               </div>
-              <span className="text-sm font-extrabold text-[#2EC78F]">{percent}%</span>
+              {percent !== null && <span className="text-sm font-extrabold text-[#2EC78F]">{percent}%</span>}
             </div>
-            <div className="mt-4 h-2 rounded-full bg-neutral-100">
-              <div className="h-full rounded-full bg-[#2EC78F]" style={{ width: `${percent}%` }} />
-            </div>
+            {percent !== null && (
+              <div className="mt-4 h-2 rounded-full bg-neutral-100">
+                <div className="h-full rounded-full bg-[#2EC78F]" style={{ width: `${Math.min(percent, 100)}%` }} />
+              </div>
+            )}
           </section>
 
           <div className="grid content-start gap-3">
@@ -244,8 +370,16 @@ function DailyView({ meals, dailyCalories, onSelectMeal }: { meals: DayMeal[]; d
                   <p className="text-xs font-medium text-neutral-400">{meal.date} · {meal.time}</p>
                 </div>
                 <p className={`text-sm font-extrabold ${meal.tone === "warn" ? "text-orange-500" : "text-[#2EC78F]"}`}>{meal.calories} kcal</p>
-                <button type="button" className="flex h-7 w-7 items-center justify-center rounded-full bg-neutral-50 text-neutral-300 hover:bg-rose-50 hover:text-rose-500" aria-label={`ลบ ${meal.name}`}>
-                  <ChevronRight className="h-3.5 w-3.5" />
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    onDeleteMeal(meal.id)
+                  }}
+                  className="flex h-7 w-7 items-center justify-center rounded-full bg-neutral-50 text-neutral-300 hover:bg-rose-50 hover:text-rose-500"
+                  aria-label={`ลบ ${meal.name}`}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
                 </button>
               </article>
             ))}
@@ -262,28 +396,29 @@ function DailyView({ meals, dailyCalories, onSelectMeal }: { meals: DayMeal[]; d
           </p>
           <div className="mt-1 flex items-end gap-2">
             <span className="text-3xl font-black text-[#2EC78F]">{dailyCalories.toLocaleString()}</span>
-            <span className="pb-1 text-sm font-semibold text-neutral-500">/ 1,800 kcal</span>
+            <span className="pb-1 text-sm font-semibold text-neutral-500">
+              {targets?.calories ? `/ ${targets.calories.toLocaleString()} kcal` : "kcal"}
+            </span>
           </div>
         </div>
-        <MacroSummary />
+        <MacroSummary meals={meals} targets={targets} />
         <div className="rounded-2xl bg-emerald-50 p-4 text-sm text-emerald-700">
-          <p className="font-extrabold">ข้อเสนอแนะจาก ScanZapp AI</p>
-          <p className="mt-2 text-xs leading-5">ควรเพิ่มเป้าหมายแคลอรี่มื้ออื่นด้วยโปรตีนคุณภาพดีและผักให้มากขึ้น</p>
+          <p className="font-extrabold">ข้อสังเกตจากข้อมูลจริง</p>
+          <p className="mt-2 text-xs leading-5">{advice}</p>
         </div>
       </aside>
     </div>
   )
 }
 
-function WeeklyView({ averageCalories, weekDays }: { averageCalories: number; weekDays: WeekDaySummary[] }) {
-  const maxCalories = 2200
-  const targetCalories = 1800
+function WeeklyView({ averageCalories, weekDays, targetCalories }: { averageCalories: number; weekDays: WeekDaySummary[]; targetCalories?: number }) {
+  const maxCalories = Math.max(targetCalories ? targetCalories * 1.25 : 0, ...weekDays.map((day) => day.calories), 1)
   const chartHeight = 150
-  const targetLineBottom = (targetCalories / maxCalories) * chartHeight
+  const targetLineBottom = targetCalories ? (targetCalories / maxCalories) * chartHeight : null
   const totalMeals = weekDays.reduce((sum, day) => sum + day.meals, 0)
   const trackedDays = weekDays.filter((day) => day.meals > 0)
-  const onTargetDays = trackedDays.filter((day) => day.calories <= targetCalories).length
-  const consistency = trackedDays.length > 0 ? Math.round((onTargetDays / trackedDays.length) * 100) : 0
+  const onTargetDays = targetCalories ? trackedDays.filter((day) => day.calories <= targetCalories).length : 0
+  const consistency = targetCalories && trackedDays.length > 0 ? Math.round((onTargetDays / trackedDays.length) * 100) : null
 
   return (
     <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(360px,0.95fr)]">
@@ -291,15 +426,15 @@ function WeeklyView({ averageCalories, weekDays }: { averageCalories: number; we
         <section className="grid gap-4 rounded-2xl bg-white p-5 shadow-sm ring-1 ring-black/5 sm:grid-cols-3">
           <StatBlock label="สรุปสัปดาห์นี้" value={averageCalories.toLocaleString()} helper="kcal เฉลี่ยต่อวันที่มีข้อมูล" />
           <StatBlock label="มื้อทั้งหมด" value={totalMeals.toLocaleString()} helper="มื้อ" />
-          <StatBlock label="เข้าเป้า" value={`${consistency}%`} helper="วันที่มีข้อมูล" valueClassName="text-[#2EC78F]" />
+          <StatBlock label="เข้าเป้า" value={consistency !== null ? `${consistency}%` : "ยังไม่มีเป้าหมาย"} helper="วันที่มีข้อมูล" valueClassName="text-[#2EC78F]" />
         </section>
 
         <section className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-black/5">
           <h2 className="text-sm font-extrabold">แคลอรี่รายวัน (สัปดาห์)</h2>
-          <p className="mt-1 text-xs text-neutral-400">เป้าหมาย 1,800 kcal</p>
+          <p className="mt-1 text-xs text-neutral-400">{targetCalories ? `เป้าหมาย ${targetCalories.toLocaleString()} kcal` : "ยังไม่มีเป้าหมายแคลอรี่"}</p>
           <div className="relative mt-6">
             <div className="relative h-[150px]">
-              <div className="absolute inset-x-0 border-t border-red-200" style={{ bottom: `${targetLineBottom}px` }} />
+              {targetLineBottom !== null && <div className="absolute inset-x-0 border-t border-red-200" style={{ bottom: `${targetLineBottom}px` }} />}
               <div className="relative flex h-full items-end justify-between gap-4">
                 {weekDays.map((item) => (
                   <div key={item.day} className="flex min-w-0 flex-1 flex-col items-center">
@@ -342,23 +477,25 @@ function WeeklyView({ averageCalories, weekDays }: { averageCalories: number; we
 
         <section className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-black/5">
           <h2 className="text-sm font-extrabold">มาโครนิวเทรียนต์เฉลี่ยต่อวัน</h2>
-          <MacroSummary compact />
+          <p className="mt-3 text-sm font-medium leading-6 text-neutral-500">
+            ระบบจะแสดงมาโครจากมื้ออาหารจริงในแท็บวันนี้และรายละเอียดของแต่ละมื้อ
+          </p>
         </section>
       </aside>
     </div>
   )
 }
 
-function MonthlyView({ monthDays }: { monthDays: MonthDaySummary[] }) {
+function MonthlyView({ monthDays, targetCalories }: { monthDays: MonthDaySummary[]; targetCalories?: number }) {
   const trackedDays = monthDays.filter((item) => item.entries > 0)
   const totalCalories = monthDays.reduce((sum, item) => sum + item.calories, 0)
   const totalMeals = monthDays.reduce((sum, item) => sum + item.entries, 0)
-  const onTargetDays = trackedDays.filter((item) => item.calories <= 1800).length
+  const onTargetDays = targetCalories ? trackedDays.filter((item) => item.calories <= targetCalories).length : 0
   const averageCalories = trackedDays.length > 0 ? Math.round(totalCalories / trackedDays.length) : 0
   const monthSummary = [
     { icon: Flame, label: "แคลอรี่เฉลี่ย/วัน", value: `${averageCalories.toLocaleString()} kcal`, bg: "bg-amber-50", color: "text-orange-500" },
     { icon: Utensils, label: "มื้ออาหารทั้งหมด", value: `${totalMeals.toLocaleString()} มื้อ`, bg: "bg-emerald-50", color: "text-emerald-500" },
-    { icon: Trophy, label: "วันที่ทำสำเร็จ", value: `${onTargetDays}/${trackedDays.length} วัน`, bg: "bg-emerald-50", color: "text-amber-500" },
+    { icon: Trophy, label: "วันที่ทำสำเร็จ", value: targetCalories ? `${onTargetDays}/${trackedDays.length} วัน` : "ยังไม่มีเป้าหมาย", bg: "bg-emerald-50", color: "text-amber-500" },
     { icon: Scale, label: "วันที่มีข้อมูล", value: `${trackedDays.length}/${monthDays.length} วัน`, bg: "bg-slate-50", color: "text-slate-500" },
   ]
 
@@ -441,7 +578,28 @@ function MonthlyView({ monthDays }: { monthDays: MonthDaySummary[] }) {
   )
 }
 
-function MealDetailModal({ meal, onClose }: { meal: DayMeal; onClose: () => void }) {
+function MealDetailModal({
+  meal,
+  onClose,
+  onDelete,
+  onUpdate,
+}: {
+  meal: DayMeal
+  onClose: () => void
+  onDelete: (mealId: string) => void
+  onUpdate: (meal: DayMeal) => void
+}) {
+  const [editing, setEditing] = useState(false)
+  const [form, setForm] = useState({
+    name: meal.name,
+    calories: String(meal.calories),
+    protein: String(meal.protein ?? 0),
+    carbs: String(meal.carbs ?? 0),
+    fat: String(meal.fat ?? 0),
+    date: meal.date,
+    time: meal.time,
+    note: meal.note ?? "",
+  })
   const detail = {
     protein: meal.protein ?? 0,
     carbs: meal.carbs ?? 0,
@@ -459,6 +617,26 @@ function MealDetailModal({ meal, onClose }: { meal: DayMeal; onClose: () => void
   ]
   const maxMacro = Math.max(...macros.map((macro) => macro.value), 1)
 
+  const updateField = (key: keyof typeof form, value: string) => {
+    setForm((current) => ({ ...current, [key]: value }))
+  }
+
+  const saveChanges = () => {
+    const nextMeal: DayMeal = {
+      ...meal,
+      name: form.name.trim() || meal.name,
+      calories: Number(form.calories) || 0,
+      protein: Number(form.protein) || 0,
+      carbs: Number(form.carbs) || 0,
+      fat: Number(form.fat) || 0,
+      date: form.date,
+      time: form.time,
+      note: form.note.trim(),
+    }
+    onUpdate(nextMeal)
+    setEditing(false)
+  }
+
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/30 p-3 backdrop-blur-sm sm:items-center" role="dialog" aria-modal="true" aria-labelledby="meal-detail-title">
       <div className="w-full max-w-xl overflow-hidden rounded-3xl bg-white shadow-2xl">
@@ -473,12 +651,46 @@ function MealDetailModal({ meal, onClose }: { meal: DayMeal; onClose: () => void
               </p>
             </div>
           </div>
-          <button type="button" onClick={onClose} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-neutral-50 text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700" aria-label="ปิดรายละเอียดมื้ออาหาร">
-            <X className="h-4 w-4" />
-          </button>
+          <div className="flex shrink-0 items-center gap-2">
+            <button type="button" onClick={() => setEditing((current) => !current)} className="flex h-9 w-9 items-center justify-center rounded-full bg-neutral-50 text-neutral-400 hover:bg-emerald-50 hover:text-emerald-600" aria-label="แก้ไขมื้ออาหาร">
+              <PencilLine className="h-4 w-4" />
+            </button>
+            <button type="button" onClick={onClose} className="flex h-9 w-9 items-center justify-center rounded-full bg-neutral-50 text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700" aria-label="ปิดรายละเอียดมื้ออาหาร">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
         </div>
 
         <div className="space-y-5 p-5">
+          {editing && (
+            <section className="grid gap-3 rounded-2xl bg-neutral-50 p-4 sm:grid-cols-2">
+              <EditField label="ชื่ออาหาร" value={form.name} onChange={(value) => updateField("name", value)} className="sm:col-span-2" />
+              <EditField label="แคลอรี่" value={form.calories} onChange={(value) => updateField("calories", value)} type="number" />
+              <EditField label="โปรตีน (g)" value={form.protein} onChange={(value) => updateField("protein", value)} type="number" />
+              <EditField label="คาร์บ (g)" value={form.carbs} onChange={(value) => updateField("carbs", value)} type="number" />
+              <EditField label="ไขมัน (g)" value={form.fat} onChange={(value) => updateField("fat", value)} type="number" />
+              <EditField label="วันที่" value={form.date} onChange={(value) => updateField("date", value)} type="date" />
+              <EditField label="เวลา" value={form.time} onChange={(value) => updateField("time", value)} type="time" />
+              <label className="block sm:col-span-2">
+                <span className="text-xs font-bold text-neutral-500">โน้ต</span>
+                <textarea
+                  value={form.note}
+                  onChange={(event) => updateField("note", event.target.value)}
+                  className="mt-1 min-h-20 w-full rounded-xl border border-neutral-200 bg-white px-3 py-2 text-sm outline-none focus:border-emerald-400"
+                />
+              </label>
+              <div className="flex flex-wrap gap-2 sm:col-span-2">
+                <button type="button" onClick={saveChanges} className="inline-flex h-10 items-center justify-center gap-2 rounded-full bg-emerald-600 px-4 text-sm font-bold text-white hover:bg-emerald-700">
+                  <Save className="h-4 w-4" />
+                  บันทึก
+                </button>
+                <button type="button" onClick={() => setEditing(false)} className="inline-flex h-10 items-center justify-center rounded-full border border-neutral-200 px-4 text-sm font-bold text-neutral-600 hover:bg-white">
+                  ยกเลิก
+                </button>
+              </div>
+            </section>
+          )}
+
           <div className="grid gap-3 sm:grid-cols-3">
             <div className="rounded-2xl bg-emerald-50 p-4">
               <p className="text-xs font-bold text-emerald-600">แคลอรี่</p>
@@ -519,9 +731,125 @@ function MealDetailModal({ meal, onClose }: { meal: DayMeal; onClose: () => void
             <h3 className="font-extrabold">ข้อเสนอแนะจาก ScanZapp AI</h3>
             <p className="mt-2 leading-6">{detail.note}</p>
           </section>
+
+          <button
+            type="button"
+            onClick={() => onDelete(meal.id)}
+            className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-full border border-rose-200 text-sm font-bold text-rose-500 hover:bg-rose-50"
+          >
+            <Trash2 className="h-4 w-4" />
+            ลบมื้อนี้
+          </button>
         </div>
       </div>
     </div>
+  )
+}
+
+function ManualMealModal({ onClose, onAdd }: { onClose: () => void; onAdd: (meal: DayMeal) => void }) {
+  const now = new Date()
+  const [form, setForm] = useState({
+    name: "",
+    calories: "",
+    protein: "",
+    carbs: "",
+    fat: "",
+    date: getLocalDateKey(now),
+    time: now.toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit", hour12: false }),
+    note: "",
+  })
+
+  const updateField = (key: keyof typeof form, value: string) => {
+    setForm((current) => ({ ...current, [key]: value }))
+  }
+
+  const submit = () => {
+    const name = form.name.trim()
+    if (!name) return
+
+    onAdd({
+      id: `manual-${Date.now()}`,
+      icon: "🍽️",
+      name,
+      time: form.time,
+      date: form.date,
+      calories: Number(form.calories) || 0,
+      tone: Number(form.calories) > 420 ? "warn" : "good",
+      protein: Number(form.protein) || 0,
+      carbs: Number(form.carbs) || 0,
+      fat: Number(form.fat) || 0,
+      source: "manual",
+      confidence: 100,
+      note: form.note.trim(),
+    })
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/30 p-3 backdrop-blur-sm sm:items-center" role="dialog" aria-modal="true" aria-labelledby="manual-meal-title">
+      <div className="w-full max-w-xl overflow-hidden rounded-3xl bg-white shadow-2xl">
+        <div className="flex items-start justify-between gap-4 border-b border-neutral-100 p-5">
+          <div>
+            <h2 id="manual-meal-title" className="text-xl font-black text-neutral-950">เพิ่มมื้ออาหารเอง</h2>
+            <p className="mt-1 text-sm font-semibold text-neutral-400">บันทึกข้อมูลโภชนาการโดยไม่ต้องสแกนภาพ</p>
+          </div>
+          <button type="button" onClick={onClose} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-neutral-50 text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700" aria-label="ปิดฟอร์มเพิ่มมื้ออาหาร">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="grid gap-3 p-5 sm:grid-cols-2">
+          <EditField label="ชื่ออาหาร" value={form.name} onChange={(value) => updateField("name", value)} className="sm:col-span-2" />
+          <EditField label="แคลอรี่" value={form.calories} onChange={(value) => updateField("calories", value)} type="number" />
+          <EditField label="โปรตีน (g)" value={form.protein} onChange={(value) => updateField("protein", value)} type="number" />
+          <EditField label="คาร์บ (g)" value={form.carbs} onChange={(value) => updateField("carbs", value)} type="number" />
+          <EditField label="ไขมัน (g)" value={form.fat} onChange={(value) => updateField("fat", value)} type="number" />
+          <EditField label="วันที่" value={form.date} onChange={(value) => updateField("date", value)} type="date" />
+          <EditField label="เวลา" value={form.time} onChange={(value) => updateField("time", value)} type="time" />
+          <label className="block sm:col-span-2">
+            <span className="text-xs font-bold text-neutral-500">โน้ต</span>
+            <textarea
+              value={form.note}
+              onChange={(event) => updateField("note", event.target.value)}
+              className="mt-1 min-h-20 w-full rounded-xl border border-neutral-200 bg-white px-3 py-2 text-sm outline-none focus:border-emerald-400"
+            />
+          </label>
+          <div className="flex flex-wrap gap-2 sm:col-span-2">
+            <button type="button" onClick={submit} className="inline-flex h-10 items-center justify-center gap-2 rounded-full bg-emerald-600 px-4 text-sm font-bold text-white hover:bg-emerald-700">
+              <Save className="h-4 w-4" />
+              บันทึกมื้ออาหาร
+            </button>
+            <button type="button" onClick={onClose} className="inline-flex h-10 items-center justify-center rounded-full border border-neutral-200 px-4 text-sm font-bold text-neutral-600 hover:bg-neutral-50">
+              ยกเลิก
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function EditField({
+  label,
+  value,
+  onChange,
+  type = "text",
+  className = "",
+}: {
+  label: string
+  value: string
+  onChange: (value: string) => void
+  type?: string
+  className?: string
+}) {
+  return (
+    <label className={`block ${className}`}>
+      <span className="text-xs font-bold text-neutral-500">{label}</span>
+      <input
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        type={type}
+        className="mt-1 h-10 w-full rounded-xl border border-neutral-200 bg-white px-3 text-sm outline-none focus:border-emerald-400"
+      />
+    </label>
   )
 }
 
@@ -534,22 +862,48 @@ function InfoTile({ label, value }: { label: string; value: string }) {
   )
 }
 
-function MacroSummary({ compact = false }: { compact?: boolean }) {
+function MacroSummary({ meals, targets, compact = false }: { meals: DayMeal[]; targets: NutritionTargets | null; compact?: boolean }) {
+  const rows = [
+    {
+      label: "โปรตีน",
+      current: meals.reduce((sum, meal) => sum + (meal.protein ?? 0), 0),
+      target: targets?.protein,
+      color: "bg-emerald-400",
+    },
+    {
+      label: "คาร์โบไฮเดรต",
+      current: meals.reduce((sum, meal) => sum + (meal.carbs ?? 0), 0),
+      target: targets?.carbs,
+      color: "bg-blue-500",
+    },
+    {
+      label: "ไขมัน",
+      current: meals.reduce((sum, meal) => sum + (meal.fat ?? 0), 0),
+      target: targets?.fat,
+      color: "bg-orange-400",
+    },
+  ]
+
   return (
     <div className={compact ? "mt-4 space-y-3" : "space-y-3"}>
-      {macroRows.map((item) => (
+      {rows.map((item) => {
+        const hasTarget = Boolean(item.target && item.target > 0)
+        const width = hasTarget ? Math.min(100, (item.current / Number(item.target)) * 100) : meals.length > 0 ? 100 : 0
+
+        return (
         <div key={item.label}>
           <div className="mb-1 flex items-center justify-between gap-2 text-xs font-semibold">
             <span className="text-neutral-600">{item.label}</span>
             <span className="text-neutral-500">
-              {item.current}g / {item.target}g
+              {Math.round(item.current)}g{hasTarget ? ` / ${item.target}g` : ""}
             </span>
           </div>
           <div className="h-2 rounded-full bg-neutral-100">
-            <div className={`h-full rounded-full ${item.color}`} style={{ width: `${Math.min(100, (item.current / item.target) * 100)}%` }} />
+            <div className={`h-full rounded-full ${item.color}`} style={{ width: `${width}%` }} />
           </div>
         </div>
-      ))}
+        )
+      })}
     </div>
   )
 }

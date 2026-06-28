@@ -1,0 +1,129 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:../data/scanzapp-prisma.db"
+}
+
+model User {
+  id           String        @id @default(cuid())
+  name         String
+  email        String        @unique
+  passwordHash String        @map("password_hash")
+  role         Role          @default(user)
+  createdAt    DateTime      @default(now()) @map("created_at")
+  updatedAt    DateTime      @updatedAt @map("updated_at")
+  sessions     Session[]
+  profile      Profile?
+  settings     UserSettings?
+  meals        Meal[]
+  waterLogs    WaterLog[]
+  scanResults  ScanResult[]
+
+  @@map("users")
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  tokenHash String   @unique @map("token_hash")
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model Profile {
+  userId       String   @id @map("user_id")
+  selectedGoal String?  @map("selected_goal")
+  formJson     String   @default("{}") @map("form_json")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("profiles")
+}
+
+model UserSettings {
+  userId       String   @id @map("user_id")
+  settingsJson String   @map("settings_json")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_settings")
+}
+
+model Meal {
+  id          String       @id
+  userId      String       @map("user_id")
+  name        String
+  calories    Float
+  protein     Float
+  carbs       Float
+  fat         Float
+  time        String
+  date        String
+  source      MealSource
+  confidence  Float?
+  note        String?
+  imageUrl    String?      @map("image_url")
+  createdAt   DateTime     @default(now()) @map("created_at")
+  updatedAt   DateTime     @updatedAt @map("updated_at")
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  scanResults ScanResult[]
+
+  @@index([userId, date])
+  @@map("meals")
+}
+
+model WaterLog {
+  id        String   @id
+  userId    String   @map("user_id")
+  date      String
+  time      String
+  amount    Float
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, date])
+  @@map("water_logs")
+}
+
+model ScanResult {
+  id             String     @id @default(cuid())
+  userId         String?    @map("user_id")
+  mealId         String?    @map("meal_id")
+  model          String
+  status         ScanStatus
+  isFood         Boolean?   @map("is_food")
+  confidence     Float?
+  latencyMs      Int        @map("latency_ms")
+  upstreamStatus Int?       @map("upstream_status")
+  errorMessage   String?    @map("error_message")
+  rawPreview     String?    @map("raw_preview")
+  createdAt      DateTime   @default(now()) @map("created_at")
+  user           User?      @relation(fields: [userId], references: [id], onDelete: SetNull)
+  meal           Meal?      @relation(fields: [mealId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@index([userId, createdAt])
+  @@map("scan_results")
+}
+
+enum Role {
+  user
+  admin
+}
+
+enum MealSource {
+  scan
+  manual
+}
+
+enum ScanStatus {
+  success
+  error
+}

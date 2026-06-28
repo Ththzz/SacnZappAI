@@ -19,25 +19,7 @@ import {
   Activity,
   ChartColumnIncreasing,
 } from "lucide-react"
-
-type GoalMode = "lose" | "maintain" | "gain"
-type ActivityLevel = "low" | "medium" | "high"
-
-type AppSettings = {
-  notifications: {
-    mealReminder: boolean
-    waterReminder: boolean
-    weeklyReport: boolean
-  }
-  healthGoal: {
-    mode: GoalMode
-    weeklyDeltaKg: number
-    currentWeightKg: number
-    targetWeightKg: number
-    dailyCalories: number
-    activityLevel: ActivityLevel
-  }
-}
+import { DEFAULT_SETTINGS, normalizeSettings, updateHealthGoal, type ActivityLevel, type AppSettings, type GoalMode } from "@/lib/settings"
 
 const SETTINGS_STORAGE_KEY = "nutriscan.settings.v1"
 const STORAGE_KEYS_TO_CLEAR = [
@@ -47,28 +29,6 @@ const STORAGE_KEYS_TO_CLEAR = [
   "nutriscan.profile",
   "nutriscan.scan.history",
 ]
-
-const DEFAULT_SETTINGS: AppSettings = {
-  notifications: {
-    mealReminder: true,
-    waterReminder: true,
-    weeklyReport: false,
-  },
-  healthGoal: {
-    mode: "lose",
-    weeklyDeltaKg: 0.5,
-    currentWeightKg: 70,
-    targetWeightKg: 68,
-    dailyCalories: 1800,
-    activityLevel: "medium",
-  },
-}
-
-const activityFactor: Record<ActivityLevel, number> = {
-  low: 1.2,
-  medium: 1.45,
-  high: 1.7,
-}
 
 export default function SettingsClient() {
   const router = useRouter()
@@ -94,10 +54,7 @@ export default function SettingsClient() {
       })
       .then((parsed) => {
         if (parsed) {
-          setSettings({
-            notifications: { ...DEFAULT_SETTINGS.notifications, ...parsed.notifications },
-            healthGoal: { ...DEFAULT_SETTINGS.healthGoal, ...parsed.healthGoal },
-          })
+          setSettings(normalizeSettings(parsed))
         }
       })
       .finally(() => setLoaded(true))
@@ -144,19 +101,12 @@ export default function SettingsClient() {
   const updateGoal = <K extends keyof AppSettings["healthGoal"]>(key: K, value: AppSettings["healthGoal"][K]) => {
     setSettings((current) => ({
       ...current,
-      healthGoal: {
-        ...current.healthGoal,
-        [key]: value,
-      },
+      healthGoal: updateHealthGoal(current.healthGoal, key, value),
     }))
   }
 
   const applyGoalMode = (mode: GoalMode) => {
-    const baseBmr = Math.round(settings.healthGoal.currentWeightKg * 22)
-    const tdee = Math.round(baseBmr * activityFactor[settings.healthGoal.activityLevel])
-    const calories = mode === "lose" ? tdee - 350 : mode === "gain" ? tdee + 280 : tdee
     updateGoal("mode", mode)
-    updateGoal("dailyCalories", Math.max(1400, calories))
   }
 
   const exportData = () => {

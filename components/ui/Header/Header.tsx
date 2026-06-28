@@ -20,19 +20,19 @@ const pageTitles: Record<string, string> = {
 function readProfileName() {
   try {
     const raw = window.localStorage.getItem(STORAGE_KEYS.profile)
-    if (!raw) return "Thanapol"
+    if (!raw) return "ผู้ใช้"
 
     const stored = JSON.parse(raw) as { form?: { name?: unknown } }
     const name = typeof stored.form?.name === "string" ? stored.form.name.trim() : ""
-    return name ? name.split(/\s+/)[0] : "Thanapol"
+    return name ? name.split(/\s+/)[0] : "ผู้ใช้"
   } catch {
-    return "Thanapol"
+    return "ผู้ใช้"
   }
 }
 
 const Header = () => {
   const pathname = usePathname()
-  const [firstName, setFirstName] = useState("Thanapol")
+  const [firstName, setFirstName] = useState("ผู้ใช้")
   const [dateLabel, setDateLabel] = useState("")
   const pageTitle = pageTitles[pathname] ?? "ScanZapp AI"
 

@@ -6,7 +6,6 @@ import { CheckCircle2, Droplet, Droplets, Minus, Plus, Target, Trash2, Waves } f
 import { getLocalDateKey, readWaterLogs, writeWaterLogs, type WaterLogEntry } from '@/lib/user-data'
 
 const drinkOptions = [150, 250, 350, 500]
-const targetMl = 2000
 
 const chartMaxCups = 10
 const chartHeight = 130
@@ -36,6 +35,7 @@ export default function WaterTrackerClient() {
   const [logs, setLogs] = useState<WaterLogEntry[]>([])
   const [selectedAmount, setSelectedAmount] = useState(250)
   const [loaded, setLoaded] = useState(false)
+  const [targetMl] = useState<number | null>(null)
   const todayKey = getLocalDateKey()
   const todayLabel = new Intl.DateTimeFormat('th-TH', { day: 'numeric', month: 'long', year: 'numeric' }).format(new Date())
 
@@ -61,14 +61,14 @@ export default function WaterTrackerClient() {
   const todayLogs = logs.filter((item) => item.date === todayKey)
   const totalMl = todayLogs.reduce((sum, item) => sum + item.amount, 0)
   const cups = Math.round(totalMl / 250)
-  const targetCups = Math.round(targetMl / 250)
+  const targetCups = targetMl ? Math.round(targetMl / 250) : null
   const weekData = useMemo(() => buildWaterWeekData(logs), [logs])
   const bestCups = Math.max(...weekData.map((item) => item.cups), 0)
   const averageCups = Math.round((weekData.reduce((sum, item) => sum + item.cups, 0) / weekData.length) * 10) / 10
-  const progress = Math.min(totalMl / targetMl, 1)
-  const waterLevel = 34 + progress * 45
-  const remainingCups = Math.max(targetCups - cups, 0)
-  const targetLineBottom = (targetCups / chartMaxCups) * chartHeight
+  const progress = targetMl ? Math.min(totalMl / targetMl, 1) : null
+  const waterLevel = 34 + Math.min(cups / chartMaxCups, 1) * 45
+  const remainingCups = targetCups ? Math.max(targetCups - cups, 0) : null
+  const targetLineBottom = targetCups ? (targetCups / chartMaxCups) * chartHeight : null
 
   const handleAddWater = () => {
     const nextTime = new Date().toLocaleTimeString('th-TH', {
@@ -182,7 +182,7 @@ export default function WaterTrackerClient() {
               <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
                 <div className="flex items-end gap-2">
                   <span className="text-7xl font-extrabold leading-none text-blue-500">{cups}</span>
-                  <span className="mb-3 text-sm font-semibold text-blue-400">/ {targetCups} แก้ว</span>
+                  <span className="mb-3 text-sm font-semibold text-blue-400">แก้ว</span>
                 </div>
                 <Droplet className="mt-5 h-8 w-8 fill-sky-100 text-sky-500" />
               </div>
@@ -266,21 +266,25 @@ export default function WaterTrackerClient() {
               <StatCard label="เฉลี่ย 7 วัน" value={`${averageCups} แก้ว`} valueClassName="text-blue-500" />
               <StatCard label="ดีที่สุด" value={`${bestCups} แก้ว`} valueClassName="text-emerald-500" />
               <StatCard label="วันนี้" value={`${cups} แก้ว`} valueClassName="text-orange-500" />
-              <StatCard label="เป้าหมาย" value={`${targetCups} แก้ว`} valueClassName="text-neutral-700" />
+              <StatCard label="เป้าหมาย" value={targetCups ? `${targetCups} แก้ว` : "ยังไม่มี"} valueClassName="text-neutral-700" />
             </div>
           </div>
 
           <div className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-black/5">
             <div className="flex items-center justify-between gap-3">
               <h2 className="text-sm font-bold">แนวโน้มใน 7 วัน</h2>
-              <span className="text-xs font-semibold text-orange-400">เป้าหมาย {targetCups} แก้ว</span>
+              <span className="text-xs font-semibold text-orange-400">
+                {targetCups ? `เป้าหมาย ${targetCups} แก้ว` : "ยังไม่มีเป้าหมาย"}
+              </span>
             </div>
             <div className="relative mt-5">
               <div className="relative h-[130px]">
-                <div
-                  className="pointer-events-none absolute inset-x-0 z-0 border-t border-orange-200"
-                  style={{ bottom: `${targetLineBottom}px` }}
-                />
+                {targetLineBottom !== null && (
+                  <div
+                    className="pointer-events-none absolute inset-x-0 z-0 border-t border-orange-200"
+                    style={{ bottom: `${targetLineBottom}px` }}
+                  />
+                )}
                 <div className="relative z-10 flex h-full items-end justify-between gap-3">
                   {weekData.map((item) => {
                     return (
@@ -308,15 +312,19 @@ export default function WaterTrackerClient() {
           <div className="grid gap-3 rounded-2xl bg-emerald-50 p-4 text-sm text-emerald-700 ring-1 ring-emerald-100 sm:grid-cols-[auto_1fr]">
             <CheckCircle2 className="mt-0.5 h-5 w-5 text-emerald-500" />
             <div>
-              <p className="font-bold">เป้าหมาย: อีก {remainingCups} แก้ว</p>
+              <p className="font-bold">
+                {remainingCups !== null ? `เป้าหมาย: อีก ${remainingCups} แก้ว` : "ยังไม่มีเป้าหมายการดื่มน้ำ"}
+              </p>
               <p className="mt-1 text-xs font-medium text-emerald-600">
-                ดื่มไปแล้ว {cups} แก้ว / {targetCups} แก้ว วันนี้คืบหน้า {Math.round(progress * 100)}%
+                {progress !== null
+                  ? `ดื่มไปแล้ว ${cups} แก้ว / ${targetCups} แก้ว วันนี้คืบหน้า ${Math.round(progress * 100)}%`
+                  : `วันนี้บันทึกน้ำแล้ว ${cups} แก้ว (${totalMl.toLocaleString()} ml)`}
               </p>
             </div>
           </div>
 
           <div className="grid gap-3 sm:grid-cols-2">
-            <SmallInfo icon={Target} label="เป้าหมายต่อวัน" value={`${targetMl.toLocaleString()} ml`} />
+            <SmallInfo icon={Target} label="เป้าหมายต่อวัน" value={targetMl ? `${targetMl.toLocaleString()} ml` : "ยังไม่มีเป้าหมาย"} />
             <SmallInfo icon={Waves} label="รวมวันนี้" value={`${totalMl.toLocaleString()} ml`} />
           </div>
         </section>

@@ -1,4 +1,6 @@
 import { NextResponse } from 'next/server'
+import { getCurrentUser } from '@/lib/auth'
+import { prisma } from '@/lib/db'
 
 type FoodAnalysis = {
   isFood: boolean
@@ -24,6 +26,36 @@ const isDevelopment = process.env.NODE_ENV === 'development'
 function logScanFoodDebug(message: string, details?: Record<string, unknown>) {
   if (!isDevelopment) return
   console.info('[scan-food]', message, details ?? '')
+}
+
+async function recordScanResult(input: {
+  userId?: string | null
+  model: string
+  status: 'success' | 'error'
+  isFood?: boolean | null
+  confidence?: number | null
+  latencyMs: number
+  upstreamStatus?: number | null
+  errorMessage?: string | null
+  rawPreview?: string | null
+}) {
+  try {
+    await prisma.scanResult.create({
+      data: {
+        userId: input.userId ?? null,
+        model: input.model,
+        status: input.status,
+        isFood: input.isFood ?? null,
+        confidence: input.confidence ?? null,
+        latencyMs: input.latencyMs,
+        upstreamStatus: input.upstreamStatus ?? null,
+        errorMessage: input.errorMessage ?? null,
+        rawPreview: input.rawPreview ?? null,
+      },
+    })
+  } catch (error) {
+    logScanFoodDebug('Failed to record scan result', { error: String(error) })
+  }
 }
 
 function isBusyModelMessage(message?: string) {
@@ -216,10 +248,19 @@ async function requestQwenAnalysis(apiKey: string, requestBody: ReturnType<typeo
 }
 
 export async function POST(request: Request) {
+  const startedAt = Date.now()
+  const user = await getCurrentUser().catch(() => null)
   const apiKey = process.env.QWEN_API_KEY
   const model = process.env.QWEN_MODEL?.trim() || defaultQwenModel
 
   if (!apiKey) {
+    await recordScanResult({
+      userId: user?.id,
+      model,
+      status: 'error',
+      latencyMs: Date.now() - startedAt,
+      errorMessage: 'QWEN_API_KEY missing',
+    })
     return NextResponse.json(
       { error: `ยังไม่ได้ตั้งค่า QWEN_API_KEY สำหรับวิเคราะห์ด้วย ${model}` },
       { status: 500 },
@@ -230,6 +271,13 @@ export async function POST(request: Request) {
   const imageResult = parseImageDataUrl(body?.image)
 
   if ('error' in imageResult) {
+    await recordScanResult({
+      userId: user?.id,
+      model,
+      status: 'error',
+      latencyMs: Date.now() - startedAt,
+      errorMessage: imageResult.error,
+    })
     return NextResponse.json(
       { error: imageResult.error },
       { status: 400 },
@@ -242,6 +290,13 @@ export async function POST(request: Request) {
 
   if (!qwenResponse) {
     const message = requestError instanceof Error ? requestError.message : undefined
+    await recordScanResult({
+      userId: user?.id,
+      model,
+      status: 'error',
+      latencyMs: Date.now() - startedAt,
+      errorMessage: friendlyModelError(message, model),
+    })
     return NextResponse.json({ error: friendlyModelError(message, model) }, { status: 502 })
   }
 
@@ -263,10 +318,29 @@ export async function POST(request: Request) {
       payload && typeof payload === 'object' && 'error' in payload
         ? (payload as { error?: { message?: string } }).error?.message
         : rawBody.slice(0, 300) || undefined
-    return NextResponse.json({ error: friendlyModelError(message, model), status: qwenResponse.status }, { status: qwenResponse.status })
+    const errorMessage = friendlyModelError(message, model)
+    await recordScanResult({
+      userId: user?.id,
+      model,
+      status: 'error',
+      latencyMs: Date.now() - startedAt,
+      upstreamStatus: qwenResponse.status,
+      errorMessage,
+      rawPreview: rawBody.slice(0, 500),
+    })
+    return NextResponse.json({ error: errorMessage, status: qwenResponse.status }, { status: qwenResponse.status })
   }
 
   if (!payload) {
+    await recordScanResult({
+      userId: user?.id,
+      model,
+      status: 'error',
+      latencyMs: Date.now() - startedAt,
+      upstreamStatus: qwenResponse.status,
+      errorMessage: `อ่านผลลัพธ์จาก ${model} ไม่สำเร็จ (response ไม่ใช่ JSON)`,
+      rawPreview: rawBody.slice(0, 500),
+    })
     return NextResponse.json(
       { error: `อ่านผลลัพธ์จาก ${model} ไม่สำเร็จ (response ไม่ใช่ JSON)` },
       { status: 502 },
@@ -284,6 +358,15 @@ export async function POST(request: Request) {
     logScanFoodDebug('Upstream payload content was empty', {
       payloadKeys: Object.keys(payload),
     })
+    await recordScanResult({
+      userId: user?.id,
+      model,
+      status: 'error',
+      latencyMs: Date.now() - startedAt,
+      upstreamStatus: qwenResponse.status,
+      errorMessage: `อ่านผลลัพธ์จาก ${model} ไม่สำเร็จ (content ว่าง)`,
+      rawPreview: rawBody.slice(0, 500),
+    })
     return NextResponse.json(
       { error: `อ่านผลลัพธ์จาก ${model} ไม่สำเร็จ (content ว่าง)`, payloadKeys: Object.keys(payload) },
       { status: 502 },
@@ -293,11 +376,31 @@ export async function POST(request: Request) {
   try {
     const jsonStr = extractJsonFromContent(content)
     const parsed = JSON.parse(jsonStr) as Partial<FoodAnalysis>
-    return NextResponse.json(normalizeAnalysis(parsed))
+    const analysis = normalizeAnalysis(parsed)
+    await recordScanResult({
+      userId: user?.id,
+      model,
+      status: 'success',
+      isFood: analysis.isFood,
+      confidence: analysis.confidence,
+      latencyMs: Date.now() - startedAt,
+      upstreamStatus: qwenResponse.status,
+      rawPreview: content.slice(0, 500),
+    })
+    return NextResponse.json(analysis)
   } catch (parseError) {
     logScanFoodDebug('Failed to parse model content as FoodAnalysis JSON', {
       error: String(parseError),
       contentLength: content.length,
+    })
+    await recordScanResult({
+      userId: user?.id,
+      model,
+      status: 'error',
+      latencyMs: Date.now() - startedAt,
+      upstreamStatus: qwenResponse.status,
+      errorMessage: `อ่านผลลัพธ์จาก ${model} ไม่สำเร็จ`,
+      rawPreview: content.slice(0, 500),
     })
     return NextResponse.json(
       { error: `อ่านผลลัพธ์จาก ${model} ไม่สำเร็จ` },

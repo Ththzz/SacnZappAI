@@ -1,4 +1,5 @@
 import type { Metadata } from "next"
+import { Bell } from "lucide-react"
 import { notifications } from "@/lib/notifications"
 import { Card, CardContent } from "@/components/ui/card"
 
@@ -15,6 +16,16 @@ export default function NotificationsPage() {
       <p className="text-sm text-neutral-500">ทั้งหมด {notifications.length} รายการ, ยังไม่อ่าน {unreadCount} รายการ</p>
 
       <div className="space-y-3">
+        {notifications.length === 0 && (
+          <Card>
+            <CardContent className="flex items-center gap-3 p-5 text-sm font-medium text-neutral-500">
+              <div className="rounded-full bg-neutral-100 p-2 text-neutral-400">
+                <Bell className="h-4 w-4" />
+              </div>
+              ยังไม่มีการแจ้งเตือนจากระบบ
+            </CardContent>
+          </Card>
+        )}
         {notifications.map((item) => {
           const Icon = item.icon
 

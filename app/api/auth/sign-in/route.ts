@@ -8,7 +8,7 @@ export async function POST(request: Request) {
     const email = readString(body?.email)
     const password = readString(body?.password)
 
-    const result = getUserByEmail(email)
+    const result = await getUserByEmail(email)
     if (!result || !verifyPassword(password, result.passwordHash)) {
       return NextResponse.json({ error: "อีเมลหรือรหัสผ่านไม่ถูกต้อง" }, { status: 401 })
     }

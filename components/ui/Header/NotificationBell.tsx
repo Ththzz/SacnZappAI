@@ -20,6 +20,11 @@ const NotificationBellInner = () => {
                 </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-64 p-2 relative z-50 pointer-events-auto">
+                {notifications.length === 0 && (
+                    <div className="px-3 py-4 text-sm font-medium text-neutral-500">
+                        ยังไม่มีการแจ้งเตือน
+                    </div>
+                )}
                 {notifications.map((item) => (
                     <DropdownMenuItem
                         key={item.id}
