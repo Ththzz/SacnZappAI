@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import {
   Bell,
   ChevronRight,
@@ -36,6 +36,8 @@ export default function SettingsClient() {
   const [loaded, setLoaded] = useState(false)
   const [view, setView] = useState<"main" | "health-goal">("main")
   const [notice, setNotice] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
+  const lastPersistedSettings = useRef("")
 
   useEffect(() => {
     fetch("/api/settings")
@@ -53,22 +55,60 @@ export default function SettingsClient() {
         }
       })
       .then((parsed) => {
-        if (parsed) {
-          setSettings(normalizeSettings(parsed))
-        }
+        const nextSettings = parsed ? normalizeSettings(parsed) : DEFAULT_SETTINGS
+        lastPersistedSettings.current = JSON.stringify(nextSettings)
+        setSettings(nextSettings)
       })
       .finally(() => setLoaded(true))
   }, [])
 
   useEffect(() => {
     if (!loaded) return
-    window.localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings))
-    fetch("/api/settings", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ settings }),
-    }).catch(() => undefined)
+    const serializedSettings = JSON.stringify(settings)
+    if (serializedSettings === lastPersistedSettings.current) return
+
+    const controller = new AbortController()
+    const timeout = window.setTimeout(() => {
+      window.localStorage.setItem(SETTINGS_STORAGE_KEY, serializedSettings)
+      fetch("/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ settings }),
+        signal: controller.signal,
+      })
+        .then((response) => {
+          if (response.ok) lastPersistedSettings.current = serializedSettings
+        })
+        .catch(() => undefined)
+    }, 600)
+
+    return () => {
+      window.clearTimeout(timeout)
+      controller.abort()
+    }
   }, [settings, loaded])
+
+  const saveHealthGoal = async () => {
+    const serializedSettings = JSON.stringify(settings)
+    setSaving(true)
+    setNotice(null)
+    window.localStorage.setItem(SETTINGS_STORAGE_KEY, serializedSettings)
+
+    try {
+      const response = await fetch("/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ settings }),
+      })
+      if (!response.ok) throw new Error("save")
+      lastPersistedSettings.current = serializedSettings
+      setNotice("บันทึกการเปลี่ยนแปลงเป้าหมายแล้ว")
+    } catch {
+      setNotice("บันทึกไว้ในอุปกรณ์แล้ว แต่ยังเชื่อมต่อเซิร์ฟเวอร์ไม่ได้")
+    } finally {
+      setSaving(false)
+    }
+  }
 
   const signOut = async () => {
     await fetch("/api/auth/sign-out", { method: "POST" }).catch(() => undefined)
@@ -167,7 +207,8 @@ export default function SettingsClient() {
         onBack={() => setView("main")}
         onUpdateGoal={updateGoal}
         onApplyGoalMode={applyGoalMode}
-        onSave={() => setNotice("บันทึกการเปลี่ยนแปลงเป้าหมายแล้ว")}
+        onSave={saveHealthGoal}
+        saving={saving}
       />
     )
   }
@@ -226,13 +267,15 @@ function HealthGoalView({
   onUpdateGoal,
   onApplyGoalMode,
   onSave,
+  saving,
 }: {
   settings: AppSettings
   recommendation: { protein: number; fat: number; carbs: number; weeks: number }
   onBack: () => void
   onUpdateGoal: <K extends keyof AppSettings["healthGoal"]>(key: K, value: AppSettings["healthGoal"][K]) => void
   onApplyGoalMode: (mode: GoalMode) => void
-  onSave: () => void
+  onSave: () => void | Promise<void>
+  saving: boolean
 }) {
   const modeLabels: Record<GoalMode, string> = {
     lose: "ลดน้ำหนัก",
@@ -311,8 +354,8 @@ function HealthGoalView({
           </div>
 
           <div className="mt-5 grid gap-3 sm:grid-cols-2">
-            <button type="button" onClick={onSave} className="inline-flex h-11 items-center justify-center rounded-xl bg-[#2EC78F] text-sm font-bold text-white hover:bg-[#05b474]">
-              บันทึกการเปลี่ยนแปลง
+            <button type="button" onClick={onSave} disabled={saving} className="inline-flex h-11 items-center justify-center rounded-xl bg-[#2EC78F] text-sm font-bold text-white hover:bg-[#05b474] disabled:cursor-wait disabled:opacity-70">
+              {saving ? "กำลังบันทึก..." : "บันทึกการเปลี่ยนแปลง"}
             </button>
             <button type="button" onClick={onBack} className="inline-flex h-11 items-center justify-center rounded-xl border border-neutral-200 text-sm font-bold text-neutral-500 hover:bg-neutral-50">
               ยกเลิก

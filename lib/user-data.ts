@@ -1,3 +1,15 @@
+export const MEAL_CATEGORIES = ["breakfast", "lunch", "dinner", "snack", "special"] as const
+
+export type MealCategory = (typeof MEAL_CATEGORIES)[number]
+
+export const MEAL_CATEGORY_LABELS: Record<MealCategory, string> = {
+  breakfast: "เช้า",
+  lunch: "กลางวัน",
+  dinner: "เย็น",
+  snack: "ของว่าง",
+  special: "มื้อพิเศษ",
+}
+
 export type MealEntry = {
   id: string
   name: string
@@ -10,6 +22,7 @@ export type MealEntry = {
   source: "scan" | "manual"
   confidence?: number
   note?: string
+  mealCategory?: MealCategory | null
 }
 
 export type WaterLogEntry = {
@@ -42,6 +55,23 @@ function isFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value)
 }
 
+export function isMealCategory(value: unknown): value is MealCategory {
+  return typeof value === "string" && MEAL_CATEGORIES.includes(value as MealCategory)
+}
+
+export function getTimeBasedMealCategory(time: string): Exclude<MealCategory, "snack"> {
+  const hour = Number(time.split(":")[0])
+  if (!Number.isFinite(hour) || hour < 0 || hour > 23) return "special"
+  if (hour >= 5 && hour < 11) return "breakfast"
+  if (hour >= 11 && hour < 16) return "lunch"
+  if (hour >= 16 && hour < 22) return "dinner"
+  return "special"
+}
+
+export function resolveMealCategory(meal: Pick<MealEntry, "time" | "mealCategory">): MealCategory {
+  return isMealCategory(meal.mealCategory) ? meal.mealCategory : getTimeBasedMealCategory(meal.time)
+}
+
 function isMealEntry(value: unknown): value is MealEntry {
   if (!isRecord(value)) return false
 
@@ -56,7 +86,8 @@ function isMealEntry(value: unknown): value is MealEntry {
     typeof value.date === "string" &&
     (value.source === "scan" || value.source === "manual") &&
     (value.confidence === undefined || isFiniteNumber(value.confidence)) &&
-    (value.note === undefined || typeof value.note === "string")
+    (value.note === undefined || typeof value.note === "string") &&
+    (value.mealCategory === undefined || value.mealCategory === null || isMealCategory(value.mealCategory))
   )
 }
 

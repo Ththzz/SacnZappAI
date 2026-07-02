@@ -1,9 +1,9 @@
 'use client'
 
 import Link from "next/link"
-import { usePathname, useRouter } from "next/navigation"
-import { useEffect, useState } from "react"
-import Useritem from "../Useritem/Useritem"
+import Image from "next/image"
+import { usePathname } from "next/navigation"
+import Useritem, { type UserSummary } from "../Useritem/Useritem"
 import {
   LayoutDashboard,
   History,
@@ -14,13 +14,14 @@ import {
   Settings,
   CameraIcon,
   Menu,
-  Sprout,
   ShieldCheck,
+  MessageCircleMore,
 } from "lucide-react"
 import { useSidebar } from "@/context/SidebarContext"
 
 const menuList = [
   { link: '/', text: 'แดชบอร์ด', icon: LayoutDashboard },
+  { link: '/chat', text: 'AI Health Chat', icon: MessageCircleMore },
   { link: '/scan', text: 'สแกนอาหาร', icon: CameraIcon },
   { link: '/meal-history', text: 'ประวัติมื้ออาหาร', icon: History },
   { link: '/health-insight', text: 'วิเคราะห์สุขภาพ', icon: Lightbulb },
@@ -30,19 +31,10 @@ const menuList = [
   { link: '/settings', text: 'การตั้งค่า', icon: Settings },
 ]
 
-const Sidebar = () => {
+const Sidebar = ({ user }: { user?: UserSummary | null }) => {
   const pathname = usePathname()
-  const router = useRouter()
   const { isSidebarOpen, setIsSidebarOpen } = useSidebar()
-  const [isAdmin, setIsAdmin] = useState(false)
-
-  useEffect(() => {
-    fetch("/api/auth/me")
-      .then((response) => response.json())
-      .then((data: { user?: { role?: string } | null }) => setIsAdmin(data.user?.role === "admin"))
-      .catch(() => undefined)
-  }, [])
-
+  const isAdmin = user?.role === "admin"
   const visibleMenuList = isAdmin ? [...menuList, { link: '/admin', text: 'แอดมิน', icon: ShieldCheck }] : menuList
 
   return (
@@ -72,7 +64,13 @@ const Sidebar = () => {
         <span className={`flex items-center gap-2 whitespace-nowrap overflow-hidden transition-none md:transition-[opacity,width,margin] md:duration-150 ${
           isSidebarOpen ? "opacity-100 w-auto ml-2" : "opacity-0 w-0 ml-0"
         }`}>
-          <Sprout className="h-5 w-5 shrink-0 text-emerald-100" />
+          <Image
+            src="/scanzapp-logo-transparent.png"
+            alt=""
+            width={36}
+            height={36}
+            className="h-9 w-9 shrink-0 object-contain"
+          />
           ScanZapp AI
         </span>
       </div>
@@ -89,10 +87,14 @@ const Sidebar = () => {
               <Link
                 key={item.link}
                 href={item.link}
-                prefetch
+                prefetch={item.link === '/' ? false : undefined}
+                onClick={(event) => {
+                  if (item.link === '/' && pathname !== '/') {
+                    event.preventDefault()
+                    window.location.assign('/')
+                  }
+                }}
                 aria-current={pathname === item.link ? 'page' : undefined}
-                onFocus={() => router.prefetch(item.link)}
-                onMouseEnter={() => router.prefetch(item.link)}
                 className={`flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors duration-100 ${
                   active ? 'bg-[#2EC78F]/10 text-[#2EC78F]' : 'hover:bg-gray-100'
                 }`}
@@ -109,7 +111,7 @@ const Sidebar = () => {
         </div>
 
         <div className="space-y-3 pt-4 border-t">
-          <Useritem isSidebarOpen={isSidebarOpen} />
+          <Useritem isSidebarOpen={isSidebarOpen} initialUser={user} />
         </div>
       </div>
     </div>

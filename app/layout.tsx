@@ -1,24 +1,23 @@
 import type { Metadata } from "next";
-import { Noto_Sans_Thai } from "next/font/google";
 import "./globals.css";
 import LayoutClient from "./layout-client";
 import Header from "@/components/ui/Header/Header";
-
-const notoSansThai = Noto_Sans_Thai({
-  subsets: ["thai", "latin"],
-  variable: "--font-noto-sans-thai",
-});
+import ChunkLoadRecovery from "@/components/ChunkLoadRecovery";
+import { getCurrentUser } from "@/lib/auth";
 
 export const metadata: Metadata = {
   title: "ScanZapp AI",
   description: "สแกนอาหารและติดตามโภชนาการด้วย ScanZapp AI",
 };
 
-export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+  const user = await getCurrentUser();
+
   return (
-    <html lang="th" className={notoSansThai.variable}>
+    <html lang="th">
       <body className="font-sans antialiased bg-[#F7F7F7]">
-        <LayoutClient header={<Header />}>{children}</LayoutClient>
+        <ChunkLoadRecovery />
+        <LayoutClient header={<Header user={user} />} user={user}>{children}</LayoutClient>
       </body>
     </html>
   );

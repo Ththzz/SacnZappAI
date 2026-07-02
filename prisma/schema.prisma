@@ -21,6 +21,12 @@ model User {
   meals        Meal[]
   waterLogs    WaterLog[]
   scanResults  ScanResult[]
+  conversations Conversation[]
+  messages      Message[]
+  chatConsents  ChatConsent[]
+  chatUsages    ChatUsage[]
+  mealSuggestionCache MealSuggestionCache?
+  savedMealSuggestions SavedMealSuggestion[]
 
   @@map("users")
 }
@@ -68,6 +74,7 @@ model Meal {
   source      MealSource
   confidence  Float?
   note        String?
+  mealCategory MealCategory? @map("meal_category")
   imageUrl    String?      @map("image_url")
   createdAt   DateTime     @default(now()) @map("created_at")
   updatedAt   DateTime     @updatedAt @map("updated_at")
@@ -113,6 +120,123 @@ model ScanResult {
   @@map("scan_results")
 }
 
+model MealSuggestionCache {
+  userId          String   @id @map("user_id")
+  suggestionsJson String   @map("suggestions_json")
+  generatedAt     DateTime @map("generated_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("meal_suggestion_cache")
+}
+
+model SavedMealSuggestion {
+  id             String   @id @default(cuid())
+  userId         String   @map("user_id")
+  normalizedName String   @map("normalized_name")
+  name           String
+  calories       Float
+  protein        Float
+  carbs          Float
+  fat            Float
+  reason         String?
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, normalizedName])
+  @@index([userId, createdAt])
+  @@map("saved_meal_suggestions")
+}
+
+model Conversation {
+  id         String      @id @default(cuid())
+  userId     String      @map("user_id")
+  title      String
+  summary    String?
+  pinned     Boolean     @default(false)
+  archivedAt DateTime?   @map("archived_at")
+  deletedAt  DateTime?   @map("deleted_at")
+  createdAt  DateTime    @default(now()) @map("created_at")
+  updatedAt  DateTime    @updatedAt @map("updated_at")
+  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages   Message[]
+  usages     ChatUsage[]
+
+  @@index([userId, updatedAt])
+  @@index([userId, archivedAt, updatedAt])
+  @@index([userId, pinned, updatedAt])
+  @@map("conversations")
+}
+
+model Message {
+  id               String         @id @default(cuid())
+  conversationId   String         @map("conversation_id")
+  userId           String         @map("user_id")
+  role             ChatRole
+  content          String
+  status           MessageStatus  @default(pending)
+  parentMessageId  String?        @map("parent_message_id")
+  clientRequestId  String?        @map("client_request_id")
+  model            String?
+  finishReason     String?        @map("finish_reason")
+  inputTokens      Int?           @map("input_tokens")
+  outputTokens     Int?           @map("output_tokens")
+  estimatedCostUsd Float?         @map("estimated_cost_usd")
+  createdAt        DateTime       @default(now()) @map("created_at")
+  updatedAt        DateTime       @updatedAt @map("updated_at")
+  conversation     Conversation   @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user             User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  parentMessage    Message?       @relation("MessageRetryChain", fields: [parentMessageId], references: [id], onDelete: SetNull)
+  retryMessages    Message[]      @relation("MessageRetryChain")
+  usages           ChatUsage[]
+
+  @@index([conversationId, createdAt])
+  @@index([userId, createdAt])
+  @@unique([userId, clientRequestId])
+  @@map("messages")
+}
+
+model ChatConsent {
+  id            String            @id @default(cuid())
+  userId        String            @map("user_id")
+  scope         ChatConsentScope
+  policyVersion String            @map("policy_version")
+  grantedAt     DateTime          @default(now()) @map("granted_at")
+  revokedAt     DateTime?         @map("revoked_at")
+  uiVersion     String?           @map("ui_version")
+  createdAt     DateTime          @default(now()) @map("created_at")
+  updatedAt     DateTime          @updatedAt @map("updated_at")
+  user          User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, scope, policyVersion, revokedAt])
+  @@index([userId, scope, grantedAt])
+  @@map("chat_consents")
+}
+
+model ChatUsage {
+  id               String           @id @default(cuid())
+  userId           String           @map("user_id")
+  conversationId   String           @map("conversation_id")
+  messageId        String?          @map("message_id")
+  requestId        String?          @map("request_id")
+  model            String
+  outcome          ChatUsageOutcome
+  latencyMs        Int?             @map("latency_ms")
+  inputTokens      Int?             @map("input_tokens")
+  outputTokens     Int?             @map("output_tokens")
+  estimatedCostUsd Float?           @map("estimated_cost_usd")
+  createdAt        DateTime         @default(now()) @map("created_at")
+  user             User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conversation     Conversation     @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  message          Message?         @relation(fields: [messageId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@index([conversationId, createdAt])
+  @@index([requestId])
+  @@map("chat_usages")
+}
+
 enum Role {
   user
   admin
@@ -123,7 +247,44 @@ enum MealSource {
   manual
 }
 
+enum MealCategory {
+  breakfast
+  lunch
+  dinner
+  snack
+  special
+}
+
 enum ScanStatus {
   success
   error
+}
+
+enum ChatRole {
+  user
+  assistant
+}
+
+enum MessageStatus {
+  pending
+  streaming
+  complete
+  stopped
+  error
+}
+
+enum ChatConsentScope {
+  ai_chat_basic
+  profile_context
+  nutrition_history
+  hydration_history
+  image_analysis
+  memory
+}
+
+enum ChatUsageOutcome {
+  success
+  stopped
+  error
+  timeout
 }

@@ -1,4 +1,6 @@
-import { pbkdf2Sync, randomBytes, randomUUID, timingSafeEqual, createHash } from "node:crypto"
+import { pbkdf2, randomBytes, randomUUID, timingSafeEqual, createHash } from "node:crypto"
+import { promisify } from "node:util"
+import { cache } from "react"
 import { cookies } from "next/headers"
 import { prisma } from "@/lib/db"
 
@@ -25,6 +27,7 @@ export const sessionCookieName = "scanzapp_session"
 
 const passwordIterations = 210_000
 const sessionDays = 30
+const pbkdf2Async = promisify(pbkdf2)
 
 function toUser(row: UserRecord): AuthUser {
   return {
@@ -40,20 +43,20 @@ function normalizeEmail(email: string) {
   return email.trim().toLowerCase()
 }
 
-export function hashPassword(password: string) {
+export async function hashPassword(password: string) {
   const salt = randomBytes(16).toString("hex")
-  const hash = pbkdf2Sync(password, salt, passwordIterations, 32, "sha256").toString("hex")
+  const hash = (await pbkdf2Async(password, salt, passwordIterations, 32, "sha256")).toString("hex")
   return `pbkdf2$${passwordIterations}$${salt}$${hash}`
 }
 
-export function verifyPassword(password: string, stored: string) {
+export async function verifyPassword(password: string, stored: string) {
   const [scheme, iterationsRaw, salt, expected] = stored.split("$")
   if (scheme !== "pbkdf2" || !iterationsRaw || !salt || !expected) return false
 
   const iterations = Number(iterationsRaw)
   if (!Number.isInteger(iterations) || iterations < 1) return false
 
-  const actual = pbkdf2Sync(password, salt, iterations, 32, "sha256")
+  const actual = await pbkdf2Async(password, salt, iterations, 32, "sha256")
   const expectedBuffer = Buffer.from(expected, "hex")
   return actual.length === expectedBuffer.length && timingSafeEqual(actual, expectedBuffer)
 }
@@ -70,7 +73,7 @@ export async function createUser(input: { name: string; email: string; password:
       id: randomUUID(),
       name: input.name.trim(),
       email,
-      passwordHash: hashPassword(input.password),
+      passwordHash: await hashPassword(input.password),
       role: input.role,
     },
   })
@@ -120,7 +123,7 @@ export async function destroySession() {
   cookieStore.delete(sessionCookieName)
 }
 
-export async function getCurrentUser() {
+const readCurrentUser = async () => {
   const token = (await cookies()).get(sessionCookieName)?.value
   if (!token) return null
 
@@ -138,6 +141,10 @@ export async function getCurrentUser() {
 
   return toUser(row.user)
 }
+
+// RootLayout and individual pages often need the same user during one render.
+// React cache keeps that session lookup to a single database query per request.
+export const getCurrentUser = cache(readCurrentUser)
 
 export async function requireUser() {
   const user = await getCurrentUser()
@@ -163,5 +170,9 @@ export async function requireAdmin() {
 
 export function canCreateAdmin(adminCode?: string) {
   const expected = process.env.ADMIN_SIGNUP_CODE?.trim()
-  return !expected || adminCode === expected
+  return Boolean(expected) && adminCode === expected
+}
+
+export function isAdminSignupConfigured() {
+  return Boolean(process.env.ADMIN_SIGNUP_CODE?.trim())
 }

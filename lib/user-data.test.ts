@@ -3,11 +3,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import {
   addMealEntry,
   getLocalDateKey,
+  getTimeBasedMealCategory,
   readMealEntries,
   readWaterLogs,
   STORAGE_KEYS,
   writeMealEntries,
   writeWaterLogs,
+  resolveMealCategory,
   type MealEntry,
   type WaterLogEntry,
 } from "./user-data"
@@ -30,6 +32,19 @@ const waterLog: WaterLogEntry = {
   date: "2026-06-23",
   time: "09:00",
   amount: 250,
+}
+
+if (!window.localStorage) {
+  const values = new Map<string, string>()
+  Object.defineProperty(window, "localStorage", {
+    value: {
+      clear: () => values.clear(),
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, String(value)),
+      removeItem: (key: string) => values.delete(key),
+    },
+    configurable: true,
+  })
 }
 
 describe("user-data storage helpers", () => {
@@ -95,5 +110,18 @@ describe("user-data storage helpers", () => {
 
   it("formats local date keys without UTC shifting", () => {
     expect(getLocalDateKey(new Date(2026, 0, 5, 23, 30, 0))).toBe("2026-01-05")
+  })
+
+  it("maps main meals to regular and special time ranges", () => {
+    expect(getTimeBasedMealCategory("08:00")).toBe("breakfast")
+    expect(getTimeBasedMealCategory("12:00")).toBe("lunch")
+    expect(getTimeBasedMealCategory("18:00")).toBe("dinner")
+    expect(getTimeBasedMealCategory("23:00")).toBe("special")
+    expect(getTimeBasedMealCategory("04:59")).toBe("special")
+  })
+
+  it("keeps an explicit AI snack category regardless of time", () => {
+    expect(resolveMealCategory({ time: "08:00", mealCategory: "snack" })).toBe("snack")
+    expect(resolveMealCategory({ time: "18:00", mealCategory: "snack" })).toBe("snack")
   })
 })

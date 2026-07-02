@@ -3,8 +3,14 @@
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import { FormEvent, useState } from "react"
-import { LoaderCircle, LogIn, Sprout } from "lucide-react"
+import { ArrowRight, LoaderCircle, LockKeyhole, Mail } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import AuthShell from "@/components/auth/AuthShell"
+
+function getSafeNext(value: string | null) {
+  if (!value?.startsWith("/") || value.startsWith("//") || value.startsWith("/sign-in") || value.startsWith("/sign-up")) return "/"
+  return value
+}
 
 export default function SignInPage() {
   const router = useRouter()
@@ -26,7 +32,7 @@ export default function SignInPage() {
         password: form.get("password"),
       }),
     })
-    const data = (await response.json().catch(() => ({}))) as { error?: string }
+    const data = (await response.json().catch(() => ({}))) as { error?: string; user?: { role?: "user" | "admin" } }
 
     setLoading(false)
     if (!response.ok) {
@@ -34,32 +40,32 @@ export default function SignInPage() {
       return
     }
 
-    router.replace(searchParams.get("next") || "/")
+    const destination = getSafeNext(searchParams.get("next"))
+    router.replace(
+      data.user?.role === "admin"
+        ? "/admin"
+        : `/onboarding?next=${encodeURIComponent(destination)}`,
+    )
     router.refresh()
   }
 
   return (
-    <main className="grid min-h-screen place-items-center bg-[#F7F7F7] p-4">
-      <section className="w-full max-w-md rounded-3xl bg-white p-6 shadow-sm ring-1 ring-black/5">
-        <div className="mb-7 flex items-center gap-3">
-          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-500 text-white">
-            <Sprout className="h-6 w-6" />
-          </div>
-          <div>
-            <h1 className="text-2xl font-black text-neutral-950">เข้าสู่ระบบ</h1>
-            <p className="text-sm font-medium text-neutral-400">ScanZapp AI</p>
-          </div>
+    <AuthShell>
+      <section className="w-full max-w-md">
+        <div className="mb-8">
+          <p className="text-sm font-bold text-emerald-600">ยินดีต้อนรับกลับ</p>
+          <h1 className="mt-2 text-3xl font-black text-neutral-950">เข้าสู่ระบบ</h1>
+          <p className="mt-2 text-sm leading-6 text-neutral-500">ติดตามโภชนาการและสุขภาพของคุณต่อจากที่ค้างไว้</p>
         </div>
 
-        <form className="space-y-4" onSubmit={handleSubmit}>
-          <Field label="อีเมล" name="email" type="email" autoComplete="email" />
-          <Field label="รหัสผ่าน" name="password" type="password" autoComplete="current-password" />
+        <form className="space-y-5" onSubmit={handleSubmit}>
+          <Field label="อีเมล" name="email" type="email" autoComplete="email" icon={<Mail className="h-4 w-4" />} />
+          <Field label="รหัสผ่าน" name="password" type="password" autoComplete="current-password" icon={<LockKeyhole className="h-4 w-4" />} />
 
-          {error && <div className="rounded-2xl bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-600">{error}</div>}
+          {error && <div className="rounded-xl bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-600">{error}</div>}
 
-          <Button className="h-12 w-full rounded-full bg-emerald-600 text-white hover:bg-emerald-700" disabled={loading}>
-            {loading ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <LogIn className="h-4 w-4" />}
-            เข้าสู่ระบบ
+          <Button className="h-12 w-full rounded-xl bg-[#2ec78f] text-white hover:bg-[#20b77f]" disabled={loading}>
+            {loading ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <>เข้าสู่ระบบ <ArrowRight className="h-4 w-4" /></>}
           </Button>
         </form>
 
@@ -70,21 +76,24 @@ export default function SignInPage() {
           </Link>
         </p>
       </section>
-    </main>
+    </AuthShell>
   )
 }
 
-function Field({ label, name, type, autoComplete }: { label: string; name: string; type: string; autoComplete: string }) {
+function Field({ label, name, type, autoComplete, icon }: { label: string; name: string; type: string; autoComplete: string; icon: React.ReactNode }) {
   return (
     <label className="block">
       <span className="text-sm font-bold text-neutral-700">{label}</span>
-      <input
-        required
-        name={name}
-        type={type}
-        autoComplete={autoComplete}
-        className="mt-2 h-12 w-full rounded-2xl border border-neutral-200 bg-white px-4 text-sm outline-none transition-colors focus:border-emerald-400"
-      />
+      <div className="relative mt-2">
+        <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-neutral-400">{icon}</span>
+        <input
+          required
+          name={name}
+          type={type}
+          autoComplete={autoComplete}
+          className="h-12 w-full rounded-xl border border-neutral-200 bg-neutral-50/60 pl-10 pr-4 text-sm outline-none transition-colors focus:border-emerald-400 focus:bg-white"
+        />
+      </div>
     </label>
   )
 }

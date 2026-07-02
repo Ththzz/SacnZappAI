@@ -40,7 +40,9 @@ export default function WaterTrackerClient() {
   const todayLabel = new Intl.DateTimeFormat('th-TH', { day: 'numeric', month: 'long', year: 'numeric' }).format(new Date())
 
   useEffect(() => {
-    fetch('/api/water-logs')
+    const weekStart = new Date()
+    weekStart.setDate(weekStart.getDate() - 6)
+    fetch(`/api/water-logs?from=${getLocalDateKey(weekStart)}&to=${getLocalDateKey()}&limit=500`)
       .then(async (response) => {
         const data = (await response.json().catch(() => ({}))) as { logs?: WaterLogEntry[] }
         if (!response.ok) throw new Error('api')
@@ -55,7 +57,8 @@ export default function WaterTrackerClient() {
 
   useEffect(() => {
     if (!loaded) return
-    writeWaterLogs(logs)
+    const timeout = window.setTimeout(() => writeWaterLogs(logs), 300)
+    return () => window.clearTimeout(timeout)
   }, [logs, loaded])
 
   const todayLogs = logs.filter((item) => item.date === todayKey)

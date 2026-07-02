@@ -1,5 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
+const { requireUser } = vi.hoisted(() => ({
+  requireUser: vi.fn(),
+}))
+
+vi.mock("@/lib/auth", () => ({
+  requireUser,
+}))
+
 import { POST } from "./route"
 
 const validImage = "data:image/png;base64,aGVsbG8="
@@ -22,6 +30,7 @@ describe("scan-food route", () => {
   beforeEach(() => {
     process.env.QWEN_API_KEY = "test-key"
     vi.restoreAllMocks()
+    requireUser.mockResolvedValue({ id: "user-1" })
   })
 
   afterEach(() => {
@@ -30,6 +39,32 @@ describe("scan-food route", () => {
     } else {
       process.env.QWEN_API_KEY = originalApiKey
     }
+  })
+
+  it("rejects unauthenticated requests before calling the AI provider", async () => {
+    requireUser.mockRejectedValue(
+      new Response(JSON.stringify({ error: "กรุณาเข้าสู่ระบบ" }), {
+        status: 401,
+        headers: { "Content-Type": "application/json" },
+      }),
+    )
+    const fetchSpy = vi.spyOn(globalThis, "fetch")
+
+    const response = await POST(createJsonRequest({ image: validImage }))
+
+    expect(response.status).toBe(401)
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it("rejects oversized request bodies before parsing JSON", async () => {
+    const request = createJsonRequest({ image: validImage })
+    request.headers.set("content-length", String(12 * 1024 * 1024))
+
+    const response = await POST(request)
+    const body = await readJson(response)
+
+    expect(response.status).toBe(413)
+    expect(body.error).toContain("8MB")
   })
 
   it("rejects requests without a configured API key", async () => {
@@ -70,6 +105,7 @@ describe("scan-food route", () => {
                   fat: 20,
                   confidence: 120,
                   note: "โปรตีนพอใช้",
+                  mealKind: "snack",
                 }),
               },
             },
@@ -92,6 +128,7 @@ describe("scan-food route", () => {
       fat: 20,
       confidence: 100,
       note: "โปรตีนพอใช้",
+      mealKind: "snack",
     })
   })
 

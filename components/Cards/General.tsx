@@ -1,54 +1,25 @@
-'use client'
-
-import { useEffect, useMemo, useState } from "react"
 import { Droplets, Plus, Sun, Target, Utensils } from "lucide-react"
 import { Card, CardContent } from "@/components/ui/card"
-import { getLocalDateKey, readMealEntries, readWaterLogs, type MealEntry, type WaterLogEntry } from "@/lib/user-data"
+import {
+  getLocalDateKey,
+  resolveMealCategory,
+  type MealCategory,
+  type MealEntry,
+  type WaterLogEntry,
+} from "@/lib/user-data"
+import LegacyMealClassifier from "./LegacyMealClassifier"
 
-type SettingsPayload = {
-  settings?: {
-    healthGoal?: {
-      dailyCalories?: number
-    }
-  } | null
-}
-
-function getCalorieGoal(payload: SettingsPayload): number | null {
-  const calories = Number(payload.settings?.healthGoal?.dailyCalories)
-  return Number.isFinite(calories) && calories > 0 ? Math.round(calories) : null
-}
-
-export default function General() {
-  const [meals, setMeals] = useState<MealEntry[]>([])
-  const [waterLogs, setWaterLogs] = useState<WaterLogEntry[]>([])
-  const [calorieGoal, setCalorieGoal] = useState<number | null>(null)
-
-  useEffect(() => {
-    Promise.allSettled([
-      fetch("/api/meals").then(async (response) => {
-        const data = (await response.json().catch(() => ({}))) as { meals?: MealEntry[] }
-        if (!response.ok) throw new Error("meals")
-        return data.meals ?? []
-      }),
-      fetch("/api/water-logs").then(async (response) => {
-        const data = (await response.json().catch(() => ({}))) as { logs?: WaterLogEntry[] }
-        if (!response.ok) throw new Error("water")
-        return data.logs ?? []
-      }),
-      fetch("/api/settings").then(async (response) => {
-        const data = (await response.json().catch(() => ({}))) as SettingsPayload
-        if (!response.ok) throw new Error("settings")
-        return getCalorieGoal(data)
-      }),
-    ]).then(([mealResult, waterResult, settingsResult]) => {
-      setMeals(mealResult.status === "fulfilled" ? mealResult.value : readMealEntries())
-      setWaterLogs(waterResult.status === "fulfilled" ? waterResult.value : readWaterLogs())
-      setCalorieGoal(settingsResult.status === "fulfilled" ? settingsResult.value : null)
-    })
-  }, [])
-
+export default function General({
+  meals,
+  waterLogs,
+  calorieGoal,
+}: {
+  meals: MealEntry[]
+  waterLogs: WaterLogEntry[]
+  calorieGoal: number | null
+}) {
   const todayKey = getLocalDateKey()
-  const todayMeals = useMemo(() => meals.filter((meal) => meal.date === todayKey), [meals, todayKey])
+  const todayMeals = meals.filter((meal) => meal.date === todayKey)
   const caloriesConsumed = todayMeals.reduce((sum, meal) => sum + meal.calories, 0)
   const protein = todayMeals.reduce((sum, meal) => sum + meal.protein, 0)
   const fat = todayMeals.reduce((sum, meal) => sum + meal.fat, 0)
@@ -96,21 +67,22 @@ export default function General() {
   }))
 
   const mealSlots = [
-    { icon: "🌅", title: "เช้า", match: (hour: number) => hour >= 5 && hour < 11 },
-    { icon: "☀️", title: "กลางวัน", match: (hour: number) => hour >= 11 && hour < 16 },
-    { icon: "🌙", title: "เย็น", match: (hour: number) => hour >= 16 && hour < 22 },
-    { icon: "+", title: "ของว่าง", match: (hour: number) => hour < 5 || hour >= 22 },
+    { icon: "🌅", title: "เช้า", category: "breakfast" },
+    { icon: "☀️", title: "กลางวัน", category: "lunch" },
+    { icon: "🌙", title: "เย็น", category: "dinner" },
+    { icon: "+", title: "ของว่าง", category: "snack" },
+    { icon: "✨", title: "มื้อพิเศษ", category: "special", description: "มื้อหลักช่วง 22:00–04:59" },
   ].map((slot) => {
-    const matchedMeals = todayMeals.filter((meal) => {
-      const hour = Number(meal.time.split(":")[0])
-      return Number.isFinite(hour) && slot.match(hour)
-    })
+    const matchedMeals = todayMeals.filter(
+      (meal) => resolveMealCategory(meal) === (slot.category as MealCategory),
+    )
 
     return {
       icon: slot.icon,
       title: slot.title,
       subtitle: matchedMeals.length > 0 ? `${matchedMeals.length} รายการ` : "ยังไม่มีข้อมูล",
       hasData: matchedMeals.length > 0,
+      description: slot.description,
     }
   })
 
@@ -174,8 +146,9 @@ export default function General() {
 
       <section className="space-y-4">
         <h2 className="text-lg font-semibold text-neutral-900">เพิ่มมื้ออาหาร</h2>
+        <LegacyMealClassifier enabled={meals.some((meal) => !meal.mealCategory)} />
 
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
           {mealSlots.map((meal) => (
             <Card
               key={meal.title}
@@ -191,6 +164,7 @@ export default function General() {
                     {meal.hasData ? "✓ " : "+ "}
                     {meal.subtitle}
                   </p>
+                  {meal.description && <p className="text-[11px] text-neutral-400">{meal.description}</p>}
                 </div>
               </CardContent>
             </Card>

@@ -1,9 +1,21 @@
 import { NextResponse } from "next/server"
-import { canCreateAdmin, createSession, createUser, type UserRole } from "@/lib/auth"
+import { canCreateAdmin, createSession, createUser, isAdminSignupConfigured, type UserRole } from "@/lib/auth"
 import { jsonError, readString } from "@/lib/http"
+import { checkRateLimit, getClientIp } from "@/lib/rate-limit"
 
 export async function POST(request: Request) {
   try {
+    const rateLimit = checkRateLimit(`auth:sign-up:${getClientIp(request)}`, {
+      limit: 5,
+      windowMs: 60 * 60 * 1000,
+    })
+    if (!rateLimit.allowed) {
+      return NextResponse.json(
+        { error: "สมัครบัญชีหลายครั้งเกินไป กรุณาลองใหม่ภายหลัง" },
+        { status: 429, headers: { "Retry-After": String(rateLimit.retryAfterSeconds) } },
+      )
+    }
+
     const body = (await request.json().catch(() => null)) as Record<string, unknown> | null
     const name = readString(body?.name)
     const email = readString(body?.email)
@@ -14,8 +26,13 @@ export async function POST(request: Request) {
     if (name.length < 2) return NextResponse.json({ error: "กรุณากรอกชื่ออย่างน้อย 2 ตัวอักษร" }, { status: 400 })
     if (!email.includes("@")) return NextResponse.json({ error: "อีเมลไม่ถูกต้อง" }, { status: 400 })
     if (password.length < 8) return NextResponse.json({ error: "รหัสผ่านต้องมีอย่างน้อย 8 ตัวอักษร" }, { status: 400 })
-    if (role === "admin" && !canCreateAdmin(adminCode)) {
-      return NextResponse.json({ error: "รหัสสมัครแอดมินไม่ถูกต้อง" }, { status: 403 })
+    if (role === "admin") {
+      if (!isAdminSignupConfigured()) {
+        return NextResponse.json({ error: "ระบบยังไม่ได้เปิดใช้งานการสมัครแอดมิน" }, { status: 503 })
+      }
+      if (!canCreateAdmin(adminCode)) {
+        return NextResponse.json({ error: "รหัสสมัครแอดมินไม่ถูกต้อง" }, { status: 403 })
+      }
     }
 
     const result = await createUser({ name, email, password, role: role as UserRole })

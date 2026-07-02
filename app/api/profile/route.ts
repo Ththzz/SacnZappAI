@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import { requireUser } from "@/lib/auth"
 import { prisma } from "@/lib/db"
 import { jsonError, readString } from "@/lib/http"
+import { ONBOARDING_GOALS } from "@/lib/onboarding"
 import { normalizeSettings, type AppSettings } from "@/lib/settings"
 
 export async function GET() {
@@ -24,25 +25,38 @@ export async function PATCH(request: Request) {
     const user = await requireUser()
     const body = (await request.json().catch(() => null)) as Record<string, unknown> | null
     const selectedGoal = readString(body?.selectedGoal) || null
-    const formJson = JSON.stringify(body?.form && typeof body.form === "object" ? body.form : {})
+    const form = body?.form && typeof body.form === "object" ? body.form as Record<string, unknown> : {}
+    const formJson = JSON.stringify(form)
+    const displayName = readString(form.name)
 
-    await prisma.profile.upsert({
-      where: { userId: user.id },
-      create: { userId: user.id, selectedGoal, formJson },
-      update: { selectedGoal, formJson },
-    })
+    if (selectedGoal && !ONBOARDING_GOALS.includes(selectedGoal as (typeof ONBOARDING_GOALS)[number])) {
+      return NextResponse.json({ error: "เป้าหมายสุขภาพไม่ถูกต้อง" }, { status: 400 })
+    }
 
     const settingsRow = await prisma.userSettings.findUnique({ where: { userId: user.id } })
     const parsedSettings = settingsRow?.settingsJson ? JSON.parse(settingsRow.settingsJson) as Partial<AppSettings> : null
     const settings = normalizeSettings(parsedSettings, {
       selectedGoal,
-      form: body?.form && typeof body.form === "object" ? body.form : {},
+      form,
     })
 
-    await prisma.userSettings.upsert({
-      where: { userId: user.id },
-      create: { userId: user.id, settingsJson: JSON.stringify(settings) },
-      update: { settingsJson: JSON.stringify(settings) },
+    await prisma.$transaction(async (transaction) => {
+      await transaction.profile.upsert({
+        where: { userId: user.id },
+        create: { userId: user.id, selectedGoal, formJson },
+        update: { selectedGoal, formJson },
+      })
+      await transaction.userSettings.upsert({
+        where: { userId: user.id },
+        create: { userId: user.id, settingsJson: JSON.stringify(settings) },
+        update: { settingsJson: JSON.stringify(settings) },
+      })
+      if (displayName.length >= 2 && displayName !== user.name) {
+        await transaction.user.update({
+          where: { id: user.id },
+          data: { name: displayName },
+        })
+      }
     })
 
     return NextResponse.json({ ok: true })

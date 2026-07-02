@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import { requireUser } from "@/lib/auth"
 import { prisma } from "@/lib/db"
 import { jsonError, readNumber, readString } from "@/lib/http"
+import { isMealCategory } from "@/lib/user-data"
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -28,6 +29,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
         source: body?.source === "manual" ? "manual" : "scan",
         confidence: body?.confidence === undefined ? null : readNumber(body.confidence),
         note: readString(body?.note) || null,
+        mealCategory: isMealCategory(body?.mealCategory) ? body.mealCategory : null,
         imageUrl: readString(body?.imageUrl) || null,
       },
     })

@@ -3,8 +3,9 @@
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { FormEvent, useState } from "react"
-import { LoaderCircle, Sprout, UserPlus } from "lucide-react"
+import { ArrowRight, LoaderCircle, UserPlus } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import AuthShell from "@/components/auth/AuthShell"
 
 type Role = "user" | "admin"
 
@@ -39,31 +40,27 @@ export default function SignUpPage() {
       return
     }
 
-    router.replace(role === "admin" ? "/admin" : "/")
+    router.replace(role === "admin" ? "/admin" : "/onboarding")
     router.refresh()
   }
 
   return (
-    <main className="grid min-h-screen place-items-center bg-[#F7F7F7] p-4">
-      <section className="w-full max-w-lg rounded-3xl bg-white p-6 shadow-sm ring-1 ring-black/5">
-        <div className="mb-7 flex items-center gap-3">
-          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-500 text-white">
-            <Sprout className="h-6 w-6" />
-          </div>
-          <div>
-            <h1 className="text-2xl font-black text-neutral-950">สมัครสมาชิก</h1>
-            <p className="text-sm font-medium text-neutral-400">เลือกได้ทั้งบัญชียูสเซอร์และแอดมิน</p>
-          </div>
+    <AuthShell>
+      <section className="w-full max-w-md">
+        <div className="mb-7">
+          <p className="text-sm font-bold text-emerald-600">เริ่มต้นกับ ScanZapp AI</p>
+          <h1 className="mt-2 text-3xl font-black text-neutral-950">สร้างบัญชี</h1>
+          <p className="mt-2 text-sm leading-6 text-neutral-500">สมัครแล้วตั้งค่าโปรไฟล์และเป้าหมายสุขภาพได้ทันที</p>
         </div>
 
         <form className="space-y-4" onSubmit={handleSubmit}>
-          <div className="grid grid-cols-2 rounded-full bg-neutral-100 p-1">
+          <div className="grid grid-cols-2 rounded-xl bg-neutral-100 p-1">
             {(["user", "admin"] as const).map((item) => (
               <button
                 key={item}
                 type="button"
                 onClick={() => setRole(item)}
-                className={`h-10 rounded-full text-sm font-bold transition-colors ${
+                className={`h-10 rounded-lg text-sm font-bold transition-colors ${
                   role === item ? "bg-white text-emerald-600 shadow-sm" : "text-neutral-500"
                 }`}
               >
@@ -77,11 +74,12 @@ export default function SignUpPage() {
           <Field label="รหัสผ่าน" name="password" type="password" autoComplete="new-password" />
           {role === "admin" && <Field label="รหัสสมัครแอดมิน" name="adminCode" type="password" autoComplete="off" optional />}
 
-          {error && <div className="rounded-2xl bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-600">{error}</div>}
+          {error && <div className="rounded-xl bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-600">{error}</div>}
 
-          <Button className="h-12 w-full rounded-full bg-emerald-600 text-white hover:bg-emerald-700" disabled={loading}>
+          <Button className="h-12 w-full rounded-xl bg-[#2ec78f] text-white hover:bg-[#20b77f]" disabled={loading}>
             {loading ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <UserPlus className="h-4 w-4" />}
             สมัครสมาชิก
+            {!loading && <ArrowRight className="h-4 w-4" />}
           </Button>
         </form>
 
@@ -92,7 +90,7 @@ export default function SignUpPage() {
           </Link>
         </p>
       </section>
-    </main>
+    </AuthShell>
   )
 }
 
@@ -117,7 +115,7 @@ function Field({
         name={name}
         type={type}
         autoComplete={autoComplete}
-        className="mt-2 h-12 w-full rounded-2xl border border-neutral-200 bg-white px-4 text-sm outline-none transition-colors focus:border-emerald-400"
+        className="mt-2 h-12 w-full rounded-xl border border-neutral-200 bg-neutral-50/60 px-4 text-sm outline-none transition-colors focus:border-emerald-400 focus:bg-white"
       />
     </label>
   )

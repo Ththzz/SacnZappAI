@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react"
 import { usePathname } from "next/navigation"
-import { STORAGE_KEYS } from "@/lib/user-data"
 import NotificationBell from "./NotificationBell"
 
 const pageTitles: Record<string, string> = {
@@ -17,35 +16,14 @@ const pageTitles: Record<string, string> = {
   "/admin": "แอดมิน",
 }
 
-function readProfileName() {
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEYS.profile)
-    if (!raw) return "ผู้ใช้"
-
-    const stored = JSON.parse(raw) as { form?: { name?: unknown } }
-    const name = typeof stored.form?.name === "string" ? stored.form.name.trim() : ""
-    return name ? name.split(/\s+/)[0] : "ผู้ใช้"
-  } catch {
-    return "ผู้ใช้"
-  }
-}
-
-const Header = () => {
+const Header = ({ user }: { user?: { name?: string } | null }) => {
   const pathname = usePathname()
-  const [firstName, setFirstName] = useState("ผู้ใช้")
   const [dateLabel, setDateLabel] = useState("")
   const pageTitle = pageTitles[pathname] ?? "ScanZapp AI"
+  const firstName = user?.name?.trim().split(/\s+/)[0] || "ผู้ใช้"
 
   useEffect(() => {
-    setFirstName(readProfileName())
     setDateLabel(new Intl.DateTimeFormat("th-TH", { day: "numeric", month: "long", year: "numeric" }).format(new Date()))
-    fetch("/api/auth/me")
-      .then((response) => response.json())
-      .then((data: { user?: { name?: string } | null }) => {
-        const name = data.user?.name?.trim()
-        if (name) setFirstName(name.split(/\s+/)[0])
-      })
-      .catch(() => undefined)
   }, [])
 
   return (

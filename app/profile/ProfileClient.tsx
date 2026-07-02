@@ -1,32 +1,24 @@
 "use client"
 
-import { useEffect, useState } from "react"
-import {
-  Activity,
-  BadgeCheck,
-  CalendarDays,
-  Dumbbell,
-  PencilLine,
-  Ruler,
-  Save,
-  Scale,
-  Target,
-  UserRound,
-} from "lucide-react"
-import { calculateNutritionTargets, normalizeActivityLevel, type GoalMode } from "@/lib/settings"
+import { useEffect, useRef, useState } from "react"
+import { BadgeCheck, Check, Target } from "lucide-react"
 import { STORAGE_KEYS } from "@/lib/user-data"
 
 type GoalKey = "lean" | "maintain" | "cut"
 
 type ProfileForm = {
   name: string
+  lastName: string
   email: string
+  phone: string
+  birthDate: string
   gender: string
   age: string
   height: string
   weight: string
   targetWeight: string
   activity: string
+  chronicCondition: string
 }
 
 type StoredProfile = {
@@ -34,35 +26,53 @@ type StoredProfile = {
   form?: Partial<ProfileForm>
 }
 
-const goalOptions: { key: GoalKey; label: string; hint: string }[] = [
-  { key: "lean", label: "เพิ่มกล้ามเนื้อ", hint: "เพิ่มกล้ามเนื้อแบบคุมไขมัน" },
-  { key: "maintain", label: "รักษาน้ำหนัก", hint: "รักษาน้ำหนักและบาลานซ์อาหาร" },
-  { key: "cut", label: "ลดไขมัน", hint: "ลดไขมันแบบคงมวลกล้ามเนื้อ" },
+const emptyForm: ProfileForm = {
+  name: "",
+  lastName: "",
+  email: "",
+  phone: "",
+  birthDate: "",
+  gender: "",
+  age: "",
+  height: "",
+  weight: "",
+  targetWeight: "",
+  activity: "",
+  chronicCondition: "",
+}
+
+const goalOptions: { key: GoalKey; label: string }[] = [
+  { key: "cut", label: "ลดน้ำหนัก" },
+  { key: "maintain", label: "รักษาน้ำหนัก" },
+  { key: "lean", label: "เพิ่มกล้ามเนื้อ" },
 ]
 
+function calculateAge(birthDate: string) {
+  const birthday = new Date(`${birthDate}T00:00:00`)
+  if (Number.isNaN(birthday.getTime())) return ""
+  const today = new Date()
+  let age = today.getFullYear() - birthday.getFullYear()
+  const monthDifference = today.getMonth() - birthday.getMonth()
+  if (monthDifference < 0 || (monthDifference === 0 && today.getDate() < birthday.getDate())) age -= 1
+  return age > 0 ? String(age) : ""
+}
+
 export default function ProfileClient() {
-  const [isEditing, setIsEditing] = useState(false)
-  const [selectedGoal, setSelectedGoal] = useState<GoalKey>("lean")
+  const [selectedGoal, setSelectedGoal] = useState<GoalKey>("maintain")
+  const [form, setForm] = useState<ProfileForm>(emptyForm)
   const [notice, setNotice] = useState<string | null>(null)
-  const [form, setForm] = useState<ProfileForm>({
-    name: "",
-    email: "",
-    gender: "",
-    age: "",
-    height: "",
-    weight: "",
-    targetWeight: "",
-    activity: "",
-  })
+  const [saving, setSaving] = useState(false)
+  const savedProfile = useRef<StoredProfile>({ selectedGoal: "maintain", form: emptyForm })
 
   useEffect(() => {
     const applyStoredProfile = (stored: StoredProfile) => {
-      if (stored.selectedGoal && goalOptions.some((goal) => goal.key === stored.selectedGoal)) {
-        setSelectedGoal(stored.selectedGoal)
-      }
-      if (stored.form) {
-        setForm((current) => ({ ...current, ...stored.form }))
-      }
+      const nextGoal = goalOptions.some((goal) => goal.key === stored.selectedGoal)
+        ? stored.selectedGoal!
+        : "maintain"
+      const nextForm = { ...emptyForm, ...stored.form }
+      setSelectedGoal(nextGoal)
+      setForm(nextForm)
+      savedProfile.current = { selectedGoal: nextGoal, form: nextForm }
     }
 
     fetch("/api/profile")
@@ -74,8 +84,7 @@ export default function ProfileClient() {
       .catch(() => {
         try {
           const raw = window.localStorage.getItem(STORAGE_KEYS.profile)
-          if (!raw) return
-          applyStoredProfile(JSON.parse(raw) as StoredProfile)
+          if (raw) applyStoredProfile(JSON.parse(raw) as StoredProfile)
         } catch {
           window.localStorage.removeItem(STORAGE_KEYS.profile)
         }
@@ -83,338 +92,270 @@ export default function ProfileClient() {
   }, [])
 
   const handleFieldChange = (key: keyof ProfileForm, value: string) => {
-    setForm((current) => ({ ...current, [key]: value }))
+    setNotice(null)
+    setForm((current) => ({
+      ...current,
+      [key]: value,
+      ...(key === "birthDate" ? { age: calculateAge(value) } : {}),
+    }))
   }
 
-  const handleSaveProfile = () => {
-    window.localStorage.setItem(
-      STORAGE_KEYS.profile,
-      JSON.stringify({
-        selectedGoal,
-        form,
-      }),
-    )
-    fetch("/api/profile", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ selectedGoal, form }),
-    }).catch(() => undefined)
-    setNotice("บันทึกโปรไฟล์เรียบร้อยแล้ว")
-    setIsEditing(false)
+  const handleSave = async () => {
+    const profile = { selectedGoal, form }
+    setSaving(true)
+    setNotice(null)
+    window.localStorage.setItem(STORAGE_KEYS.profile, JSON.stringify(profile))
+
+    try {
+      const response = await fetch("/api/profile", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(profile),
+      })
+      if (!response.ok) throw new Error("save")
+      savedProfile.current = profile
+      setNotice("บันทึกการเปลี่ยนแปลงเรียบร้อยแล้ว")
+    } catch {
+      setNotice("บันทึกไว้ในอุปกรณ์แล้ว แต่ยังเชื่อมต่อเซิร์ฟเวอร์ไม่ได้")
+    } finally {
+      setSaving(false)
+    }
   }
+
+  const handleCancel = () => {
+    setSelectedGoal(savedProfile.current.selectedGoal ?? "maintain")
+    setForm({ ...emptyForm, ...savedProfile.current.form })
+    setNotice(null)
+  }
+
+  const displayName = [form.name, form.lastName].filter(Boolean).join(" ") || "ผู้ใช้งาน"
+  const initial = (form.name || form.email || "U").trim().charAt(0).toUpperCase()
+  const activeGoal = goalOptions.find((goal) => goal.key === selectedGoal)?.label
+  const currentWeight = Number(form.weight)
+  const targetWeight = Number(form.targetWeight)
+  const weightDifference =
+    Number.isFinite(currentWeight) && Number.isFinite(targetWeight)
+      ? Math.abs(currentWeight - targetWeight)
+      : 0
 
   return (
-    <div className="mx-auto max-w-7xl space-y-5 text-neutral-900">
-      <div className="flex justify-end">
-        <button
-          type="button"
-          onClick={() => setIsEditing((current) => !current)}
-          className={`inline-flex h-11 items-center justify-center gap-2 rounded-full px-5 text-sm font-bold transition-colors ${
-            isEditing ? "bg-neutral-900 text-white hover:bg-neutral-800" : "bg-[#2EC78F] text-white hover:bg-[#05b474]"
-          }`}
-        >
-          <PencilLine className="h-4 w-4" />
-          {isEditing ? "ปิดการแก้ไข" : "แก้ไขโปรไฟล์"}
-        </button>
-      </div>
-
+    <div className="mx-auto max-w-[1180px] text-[#202421]">
       {notice && (
-        <div className="rounded-2xl bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-700">
+        <div
+          role="status"
+          className="mb-4 rounded-xl border border-emerald-100 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-700"
+        >
           {notice}
         </div>
       )}
 
-      <section className="grid gap-5 xl:grid-cols-[minmax(0,1.2fr)_360px]">
-        <main className="space-y-5">
-          <ProfileHero form={form} selectedGoal={selectedGoal} />
-          <GoalSection selectedGoal={selectedGoal} onSelectGoal={setSelectedGoal} />
-          <ProfileFormCard form={form} isEditing={isEditing} onFieldChange={handleFieldChange} onSave={handleSaveProfile} />
-        </main>
+      <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1.08fr)_minmax(320px,.92fr)]">
+        <section className="rounded-[22px] border border-neutral-100 bg-white p-5 shadow-[0_5px_22px_rgba(32,50,42,0.07)] sm:p-6">
+          <h2 className="text-base font-extrabold">ข้อมูลพื้นฐาน</h2>
 
-        <aside className="space-y-5">
-          <TargetSummary form={form} selectedGoal={selectedGoal} />
-          <MetricsPanel form={form} />
-        </aside>
-      </section>
+          <div className="mt-5 flex items-center gap-4">
+            <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full bg-[#7ADDB9] text-2xl font-bold text-white">
+              {initial}
+            </div>
+            <div className="min-w-0">
+              <p className="truncate text-base font-extrabold">{displayName}</p>
+              <p className="mt-1 flex items-center gap-1.5 text-xs font-semibold text-[#20B77E]">
+                <BadgeCheck className="h-4 w-4" />
+                โปรไฟล์ผู้ใช้งาน
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-6 grid gap-x-4 gap-y-4 sm:grid-cols-2">
+            <Field label="ชื่อ" value={form.name} onChange={(value) => handleFieldChange("name", value)} />
+            <Field label="นามสกุล" value={form.lastName} onChange={(value) => handleFieldChange("lastName", value)} />
+            <Field
+              className="sm:col-span-2"
+              label="อีเมล"
+              type="email"
+              value={form.email}
+              onChange={(value) => handleFieldChange("email", value)}
+            />
+            <Field
+              className="sm:col-span-2"
+              label="เบอร์โทรศัพท์"
+              type="tel"
+              placeholder="0xx-xxx-xxxx"
+              value={form.phone}
+              onChange={(value) => handleFieldChange("phone", value)}
+            />
+            <Field
+              label="วันเกิด"
+              type="date"
+              value={form.birthDate}
+              onChange={(value) => handleFieldChange("birthDate", value)}
+            />
+            <SelectField
+              label="เพศ"
+              value={form.gender}
+              onChange={(value) => handleFieldChange("gender", value)}
+              options={[
+                { value: "", label: "ไม่ระบุ" },
+                { value: "female", label: "หญิง" },
+                { value: "male", label: "ชาย" },
+                { value: "unspecified", label: "อื่น ๆ" },
+              ]}
+            />
+          </div>
+
+          <div className="mt-7 grid gap-3 sm:grid-cols-2">
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={saving}
+              className="inline-flex h-11 items-center justify-center gap-2 rounded-full bg-[#2EC78F] px-5 text-sm font-bold text-white transition-colors hover:bg-[#22B881] disabled:cursor-wait disabled:opacity-70"
+            >
+              <Check className="h-4 w-4" />
+              {saving ? "กำลังบันทึก..." : "บันทึกการเปลี่ยนแปลง"}
+            </button>
+            <button
+              type="button"
+              onClick={handleCancel}
+              className="h-11 rounded-full border border-neutral-200 bg-neutral-50 px-5 text-sm font-semibold text-neutral-500 transition-colors hover:bg-neutral-100"
+            >
+              ยกเลิก
+            </button>
+          </div>
+        </section>
+
+        <section className="overflow-hidden rounded-[22px] border border-neutral-100 bg-white shadow-[0_5px_22px_rgba(32,50,42,0.07)]">
+          <div className="p-5 sm:p-6">
+            <h2 className="text-base font-extrabold">ข้อมูลสุขภาพ</h2>
+            <div className="mt-5 space-y-4">
+              <Field
+                label="น้ำหนัก (kg)"
+                type="number"
+                value={form.weight}
+                onChange={(value) => handleFieldChange("weight", value)}
+              />
+              <Field
+                label="ส่วนสูง (cm)"
+                type="number"
+                value={form.height}
+                onChange={(value) => handleFieldChange("height", value)}
+              />
+              <SelectField
+                label="กิจกรรม"
+                value={form.activity}
+                onChange={(value) => handleFieldChange("activity", value)}
+                options={[
+                  { value: "", label: "เลือกระดับกิจกรรม" },
+                  { value: "low", label: "น้อย" },
+                  { value: "medium", label: "ปานกลาง" },
+                  { value: "high", label: "หนัก" },
+                ]}
+              />
+              <Field
+                label="โรคประจำตัว"
+                placeholder="ไม่มี"
+                value={form.chronicCondition}
+                onChange={(value) => handleFieldChange("chronicCondition", value)}
+              />
+              <Field
+                label="น้ำหนักเป้าหมาย (kg)"
+                type="number"
+                value={form.targetWeight}
+                onChange={(value) => handleFieldChange("targetWeight", value)}
+              />
+            </div>
+          </div>
+
+          <div className="bg-[#DDF8EC] px-5 py-5 sm:px-6">
+            <div className="flex items-center gap-2 text-sm font-extrabold text-[#149B6D]">
+              <Target className="h-4 w-4" />
+              เป้าหมายปัจจุบัน
+            </div>
+            <p className="mt-2 text-sm font-semibold text-[#269F77]">
+              {activeGoal}
+              {weightDifference > 0 && selectedGoal !== "maintain"
+                ? ` ${weightDifference.toFixed(weightDifference % 1 === 0 ? 0 : 1)} kg`
+                : ""}
+            </p>
+            <div className="mt-4 grid grid-cols-3 gap-2">
+              {goalOptions.map((goal) => (
+                <button
+                  key={goal.key}
+                  type="button"
+                  onClick={() => {
+                    setSelectedGoal(goal.key)
+                    setNotice(null)
+                  }}
+                  className={`min-h-10 rounded-xl px-2 py-2 text-xs font-bold transition-colors ${
+                    selectedGoal === goal.key
+                      ? "bg-[#2EC78F] text-white shadow-sm"
+                      : "bg-white/75 text-[#218B68] hover:bg-white"
+                  }`}
+                >
+                  {goal.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </section>
+      </div>
     </div>
   )
 }
 
-function ProfileHero({ form, selectedGoal }: { form: ProfileForm; selectedGoal: GoalKey }) {
-  const activeGoal = goalOptions.find((goal) => goal.key === selectedGoal)
-
-  return (
-    <section className="relative overflow-hidden rounded-[28px] bg-[linear-gradient(120deg,#169865_0%,#23B97D_40%,#65D7AA_72%,#D9F9EC_100%)] p-6 text-white shadow-sm ring-1 ring-emerald-200">
-      <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(90deg,rgba(5,68,47,0.24)_0%,rgba(5,68,47,0.12)_42%,rgba(255,255,255,0.04)_100%)]" />
-      <div className="relative grid gap-6 lg:grid-cols-[auto_1fr] lg:items-end">
-        <div className="flex h-24 w-24 items-center justify-center rounded-[28px] bg-white/18 shadow-lg shadow-emerald-950/10 backdrop-blur">
-          <UserRound className="h-12 w-12" />
-        </div>
-        <div className="space-y-3">
-          <div className="flex flex-wrap items-center gap-3">
-            <h2 className="text-3xl font-black tracking-tight text-white drop-shadow-[0_1px_0_rgba(0,0,0,0.12)] sm:text-[2.35rem]">{form.name || "ยังไม่ได้ตั้งชื่อ"}</h2>
-            <span className="inline-flex items-center gap-2 rounded-full bg-emerald-950/20 px-3 py-1 text-xs font-bold text-white shadow-sm ring-1 ring-white/20 backdrop-blur">
-              <BadgeCheck className="h-4 w-4" />
-              แผนปัจจุบัน: {activeGoal?.label}
-            </span>
-          </div>
-          <p className="max-w-2xl text-sm font-semibold leading-6 text-white/92 sm:text-[15px]">
-            {activeGoal?.hint} พร้อมติดตามน้ำหนัก แคลอรี่ และพฤติกรรมการกินให้สอดคล้องกับเป้าหมายในแต่ละสัปดาห์
-          </p>
-          <div className="grid gap-3 sm:grid-cols-3">
-            <HeroChip icon={CalendarDays} label="อายุ" value={form.age ? `${form.age} ปี` : "ยังไม่มีข้อมูล"} />
-            <HeroChip icon={Ruler} label="ส่วนสูง" value={form.height ? `${form.height} cm` : "ยังไม่มีข้อมูล"} />
-            <HeroChip icon={Scale} label="น้ำหนัก" value={form.weight ? `${form.weight} kg` : "ยังไม่มีข้อมูล"} />
-          </div>
-        </div>
-      </div>
-    </section>
-  )
-}
-
-function HeroChip({
-  icon: Icon,
+function Field({
   label,
   value,
+  onChange,
+  type = "text",
+  placeholder,
+  className = "",
 }: {
-  icon: typeof UserRound
   label: string
   value: string
+  onChange: (value: string) => void
+  type?: string
+  placeholder?: string
+  className?: string
 }) {
   return (
-    <div className="rounded-2xl bg-emerald-950/14 p-3 shadow-sm ring-1 ring-white/18 backdrop-blur">
-      <div className="flex items-center gap-2 text-xs font-bold text-white/80">
-        <Icon className="h-4 w-4" />
-        {label}
-      </div>
-      <p className="mt-2 text-xl font-black text-white">{value}</p>
-    </div>
+    <label className={`block ${className}`}>
+      <span className="mb-1.5 block text-xs font-semibold text-neutral-500">{label}</span>
+      <input
+        type={type}
+        value={value}
+        placeholder={placeholder}
+        onChange={(event) => onChange(event.target.value)}
+        className="h-11 w-full rounded-xl border border-neutral-200 bg-neutral-50 px-3.5 text-sm font-medium text-neutral-800 outline-none transition focus:border-[#2EC78F] focus:bg-white focus:ring-3 focus:ring-emerald-100"
+      />
+    </label>
   )
 }
 
-function GoalSection({
-  selectedGoal,
-  onSelectGoal,
+function SelectField({
+  label,
+  value,
+  onChange,
+  options,
 }: {
-  selectedGoal: GoalKey
-  onSelectGoal: (goal: GoalKey) => void
+  label: string
+  value: string
+  onChange: (value: string) => void
+  options: { value: string; label: string }[]
 }) {
   return (
-    <section className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-black/5">
-      <div className="flex items-center gap-2">
-        <Target className="h-4 w-4 text-[#2EC78F]" />
-        <h2 className="text-base font-extrabold">เป้าหมายหลัก</h2>
-      </div>
-      <div className="mt-4 grid gap-3 md:grid-cols-3">
-        {goalOptions.map((goal) => (
-          <button
-            key={goal.key}
-            type="button"
-            onClick={() => onSelectGoal(goal.key)}
-            className={`rounded-2xl border p-4 text-left transition-colors ${
-              selectedGoal === goal.key
-                ? "border-[#2EC78F] bg-emerald-50 shadow-sm"
-                : "border-neutral-200 bg-white hover:border-emerald-200 hover:bg-neutral-50"
-            }`}
-          >
-            <p className="text-sm font-extrabold text-neutral-900">{goal.label}</p>
-            <p className="mt-2 text-xs font-medium leading-5 text-neutral-500">{goal.hint}</p>
-          </button>
+    <label className="block">
+      <span className="mb-1.5 block text-xs font-semibold text-neutral-500">{label}</span>
+      <select
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="h-11 w-full rounded-xl border border-neutral-200 bg-neutral-50 px-3.5 text-sm font-medium text-neutral-800 outline-none transition focus:border-[#2EC78F] focus:bg-white focus:ring-3 focus:ring-emerald-100"
+      >
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
         ))}
-      </div>
-    </section>
-  )
-}
-
-function ProfileFormCard({
-  form,
-  isEditing,
-  onFieldChange,
-  onSave,
-}: {
-  form: ProfileForm
-  isEditing: boolean
-  onFieldChange: (key: keyof ProfileForm, value: string) => void
-  onSave: () => void
-}) {
-  const fields: { key: keyof ProfileForm; label: string; type?: string }[] = [
-    { key: "name", label: "ชื่อ" },
-    { key: "email", label: "อีเมล", type: "email" },
-    { key: "age", label: "อายุ", type: "number" },
-    { key: "height", label: "ส่วนสูง (cm)", type: "number" },
-    { key: "weight", label: "น้ำหนักปัจจุบัน (kg)", type: "number" },
-    { key: "targetWeight", label: "น้ำหนักเป้าหมาย (kg)", type: "number" },
-  ]
-
-  return (
-    <section className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-black/5">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="text-base font-extrabold">ข้อมูลส่วนตัว</h2>
-          <p className="mt-1 text-sm text-neutral-500">แก้ไขรายละเอียดหลักที่ใช้คำนวณเป้าหมายโภชนาการ</p>
-        </div>
-        <button
-          type="button"
-          onClick={onSave}
-          className="inline-flex h-10 items-center justify-center gap-2 rounded-full bg-[#2EC78F] px-4 text-sm font-bold text-white hover:bg-[#05b474]"
-        >
-          <Save className="h-4 w-4" />
-          บันทึกการเปลี่ยนแปลง
-        </button>
-      </div>
-
-      <div className="mt-5 grid gap-4 md:grid-cols-2">
-        <label className="space-y-2">
-          <span className="text-sm font-semibold text-neutral-500">เพศสำหรับคำนวณ BMR</span>
-          <select
-            value={form.gender}
-            disabled={!isEditing}
-            onChange={(event) => onFieldChange("gender", event.target.value)}
-            className={`h-12 w-full rounded-2xl border px-4 text-sm font-medium outline-none transition-colors ${
-              isEditing
-                ? "border-emerald-200 bg-white focus:border-[#2EC78F]"
-                : "border-neutral-200 bg-neutral-50 text-neutral-500"
-            }`}
-          >
-            <option value="">ไม่ระบุ</option>
-            <option value="male">ชาย</option>
-            <option value="female">หญิง</option>
-          </select>
-        </label>
-        <label className="space-y-2">
-          <span className="text-sm font-semibold text-neutral-500">กิจกรรมประจำวัน</span>
-          <select
-            value={form.activity}
-            disabled={!isEditing}
-            onChange={(event) => onFieldChange("activity", event.target.value)}
-            className={`h-12 w-full rounded-2xl border px-4 text-sm font-medium outline-none transition-colors ${
-              isEditing
-                ? "border-emerald-200 bg-white focus:border-[#2EC78F]"
-                : "border-neutral-200 bg-neutral-50 text-neutral-500"
-            }`}
-          >
-            <option value="">ปานกลาง</option>
-            <option value="low">น้อย</option>
-            <option value="medium">ปานกลาง</option>
-            <option value="high">หนัก</option>
-          </select>
-        </label>
-        {fields.map((field) => (
-          <label key={field.key} className="space-y-2">
-            <span className="text-sm font-semibold text-neutral-500">{field.label}</span>
-            <input
-              type={field.type ?? "text"}
-              value={form[field.key]}
-              disabled={!isEditing}
-              onChange={(event) => onFieldChange(field.key, event.target.value)}
-              className={`h-12 w-full rounded-2xl border px-4 text-sm font-medium outline-none transition-colors ${
-                isEditing
-                  ? "border-emerald-200 bg-white focus:border-[#2EC78F]"
-                  : "border-neutral-200 bg-neutral-50 text-neutral-500"
-              }`}
-            />
-          </label>
-        ))}
-      </div>
-    </section>
-  )
-}
-
-function mapProfileGoalToMode(goal: GoalKey): GoalMode {
-  if (goal === "cut") return "lose"
-  if (goal === "lean") return "gain"
-  return "maintain"
-}
-
-function TargetSummary({ form, selectedGoal }: { form: ProfileForm; selectedGoal: GoalKey }) {
-  const targetsData = calculateNutritionTargets({
-    mode: mapProfileGoalToMode(selectedGoal),
-    weeklyDeltaKg: 0.5,
-    currentWeightKg: Number(form.weight) || 70,
-    targetWeightKg: Number(form.targetWeight) || Number(form.weight) || 70,
-    activityLevel: normalizeActivityLevel(form.activity),
-    dailyCalories: 0,
-  }, { form })
-  const hasWeight = Number.isFinite(Number(form.weight)) && Number(form.weight) > 0
-  const targets = [
-    {
-      label: "พลังงาน/วัน",
-      value: hasWeight ? `${targetsData.calories.toLocaleString()} kcal` : "ยังไม่มีข้อมูล",
-      icon: Activity,
-      tone: "bg-emerald-50 text-emerald-600",
-    },
-    {
-      label: "โปรตีนเป้าหมาย",
-      value: hasWeight ? `${targetsData.protein} g` : "ยังไม่มีข้อมูล",
-      icon: Dumbbell,
-      tone: "bg-sky-50 text-sky-600",
-    },
-    {
-      label: "น้ำหนักเป้าหมาย",
-      value: Number.isFinite(Number(form.targetWeight)) && Number(form.targetWeight) > 0 ? `${form.targetWeight} kg` : "ยังไม่มีข้อมูล",
-      icon: Target,
-      tone: "bg-amber-50 text-amber-600",
-    },
-  ]
-
-  return (
-    <section className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-black/5">
-      <h2 className="text-base font-extrabold">เป้าหมายรายสัปดาห์</h2>
-      <div className="mt-4 space-y-3">
-        {targets.map((target) => {
-          const Icon = target.icon
-          return (
-            <div key={target.label} className="grid grid-cols-[44px_1fr] items-center gap-3 rounded-2xl bg-neutral-50 p-4">
-              <div className={`flex h-11 w-11 items-center justify-center rounded-2xl ${target.tone}`}>
-                <Icon className="h-5 w-5" />
-              </div>
-              <div>
-                <p className="text-xs font-semibold text-neutral-400">{target.label}</p>
-                <p className="mt-1 text-lg font-black text-neutral-900">{target.value}</p>
-              </div>
-            </div>
-          )
-        })}
-      </div>
-    </section>
-  )
-}
-
-function MetricsPanel({ form }: { form: ProfileForm }) {
-  const heightCm = Number(form.height)
-  const weightKg = Number(form.weight)
-  const hasCoreMetrics = Number.isFinite(heightCm) && heightCm > 0 && Number.isFinite(weightKg) && weightKg > 0
-  const heightM = heightCm / 100
-  const bmi = hasCoreMetrics ? weightKg / (heightM * heightM) : null
-  const targetsData = calculateNutritionTargets({
-    mode: "maintain",
-    weeklyDeltaKg: 0.5,
-    currentWeightKg: weightKg || 70,
-    targetWeightKg: Number(form.targetWeight) || weightKg || 70,
-    activityLevel: normalizeActivityLevel(form.activity),
-    dailyCalories: 0,
-  }, { form })
-  const metrics = [
-    { label: "BMR", value: targetsData.bmr ? `${targetsData.bmr.toLocaleString()} kcal` : "ยังไม่มีข้อมูล", helper: "Mifflin-St Jeor" },
-    { label: "TDEE", value: targetsData.tdee ? `${targetsData.tdee.toLocaleString()} kcal` : "ยังไม่มีข้อมูล", helper: "BMR x ระดับกิจกรรม" },
-    { label: "BMI", value: bmi ? bmi.toFixed(1) : "ยังไม่มีข้อมูล", helper: bmi ? (bmi >= 18.5 && bmi < 23 ? "อยู่ในเกณฑ์ปกติ" : "ควรประเมินร่วมกับเป้าหมายสุขภาพ") : "กรอกส่วนสูงและน้ำหนักก่อน" },
-  ]
-
-  return (
-    <section className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-black/5">
-      <div className="flex items-center gap-2">
-        <Activity className="h-4 w-4 text-[#2EC78F]" />
-        <h2 className="text-base font-extrabold">ตัวชี้วัดสุขภาพ</h2>
-      </div>
-      <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
-        {metrics.map((metric) => (
-          <div key={metric.label} className="rounded-2xl bg-emerald-50 p-4">
-            <p className="text-xs font-semibold text-emerald-700">{metric.label}</p>
-            <p className="mt-1 text-2xl font-black text-neutral-900">{metric.value}</p>
-            <p className="mt-1 text-xs font-medium text-neutral-500">{metric.helper}</p>
-          </div>
-        ))}
-      </div>
-    </section>
+      </select>
+    </label>
   )
 }

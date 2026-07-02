@@ -18,7 +18,16 @@ import {
   Utensils,
   X,
 } from "lucide-react"
-import { getLocalDateKey, readMealEntries } from "@/lib/user-data"
+import {
+  getLocalDateKey,
+  getTimeBasedMealCategory,
+  isMealCategory,
+  MEAL_CATEGORIES,
+  MEAL_CATEGORY_LABELS,
+  readMealEntries,
+  resolveMealCategory,
+  type MealCategory,
+} from "@/lib/user-data"
 
 type ViewMode = "day" | "week" | "month"
 type DayMeal = {
@@ -35,6 +44,7 @@ type DayMeal = {
   source?: string
   confidence?: number
   note?: string
+  mealCategory: MealCategory
 }
 
 type WeekDaySummary = {
@@ -155,7 +165,12 @@ export default function MealHistoryClient() {
   const todayKey = getLocalDateKey()
 
   useEffect(() => {
-    const convertMeals = (items: ReturnType<typeof readMealEntries>) => items.slice(0, 20).map((item, index) => ({
+    const now = new Date()
+    const weekStart = new Date(now)
+    weekStart.setDate(now.getDate() - 6)
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
+    const rangeStart = getLocalDateKey(weekStart < monthStart ? weekStart : monthStart)
+    const convertMeals = (items: ReturnType<typeof readMealEntries>) => items.map((item, index) => ({
       id: item.id || `meal-${index}`,
       icon: "🍽️",
       name: item.name,
@@ -169,10 +184,11 @@ export default function MealHistoryClient() {
       source: item.source,
       confidence: item.confidence,
       note: item.note,
+      mealCategory: resolveMealCategory(item),
     }))
 
     Promise.allSettled([
-      fetch("/api/meals").then(async (response) => {
+      fetch(`/api/meals?from=${rangeStart}&to=${getLocalDateKey(now)}&limit=500`).then(async (response) => {
         const data = (await response.json().catch(() => ({}))) as { meals?: ReturnType<typeof readMealEntries> }
         if (!response.ok) throw new Error("api")
         return data.meals ?? []
@@ -220,6 +236,7 @@ export default function MealHistoryClient() {
         source: updatedMeal.source ?? "scan",
         confidence: updatedMeal.confidence,
         note: updatedMeal.note,
+        mealCategory: updatedMeal.mealCategory,
       }),
     }).catch(() => undefined)
   }
@@ -242,6 +259,7 @@ export default function MealHistoryClient() {
         source: "manual",
         confidence: meal.confidence,
         note: meal.note,
+        mealCategory: meal.mealCategory,
       }),
     }).catch(() => undefined)
   }
@@ -599,6 +617,7 @@ function MealDetailModal({
     date: meal.date,
     time: meal.time,
     note: meal.note ?? "",
+    mealCategory: meal.mealCategory as string,
   })
   const detail = {
     protein: meal.protein ?? 0,
@@ -606,7 +625,6 @@ function MealDetailModal({
     fat: meal.fat ?? 0,
     portion: "1 จาน",
     source: meal.source === "scan" ? "สแกนจากภาพ" : "บันทึกด้วยมือ",
-    confidence: meal.confidence ?? 75,
     ingredients: ["ไม่ระบุส่วนประกอบ"],
     note: meal.note ?? "ยังไม่มีคำแนะนำเพิ่มเติมสำหรับมื้อนี้",
   }
@@ -632,6 +650,7 @@ function MealDetailModal({
       date: form.date,
       time: form.time,
       note: form.note.trim(),
+      mealCategory: isMealCategory(form.mealCategory) ? form.mealCategory : resolveMealCategory(meal),
     }
     onUpdate(nextMeal)
     setEditing(false)
@@ -671,6 +690,7 @@ function MealDetailModal({
               <EditField label="ไขมัน (g)" value={form.fat} onChange={(value) => updateField("fat", value)} type="number" />
               <EditField label="วันที่" value={form.date} onChange={(value) => updateField("date", value)} type="date" />
               <EditField label="เวลา" value={form.time} onChange={(value) => updateField("time", value)} type="time" />
+              <MealCategoryField value={form.mealCategory} onChange={(value) => updateField("mealCategory", value)} />
               <label className="block sm:col-span-2">
                 <span className="text-xs font-bold text-neutral-500">โน้ต</span>
                 <textarea
@@ -698,8 +718,15 @@ function MealDetailModal({
               <p className="text-xs font-semibold text-neutral-500">kcal</p>
             </div>
             <InfoTile label="ที่มา" value={detail.source} />
-            <InfoTile label="ความมั่นใจของ ScanZapp AI" value={`${detail.confidence}%`} />
+            <InfoTile label="หมวดมื้อ" value={MEAL_CATEGORY_LABELS[meal.mealCategory]} />
           </div>
+
+          {meal.mealCategory === "special" && (
+            <section className="rounded-2xl bg-violet-50 p-4 text-sm text-violet-700">
+              <h3 className="font-extrabold">มื้อพิเศษ</h3>
+              <p className="mt-1 leading-6">มื้อนี้ถูกบันทึกในช่วง 22:00–04:59 ซึ่งอยู่นอกช่วงเวลาของสามมื้อหลัก</p>
+            </section>
+          )}
 
           <section>
             <h3 className="text-sm font-extrabold text-neutral-950">สารอาหารหลัก</h3>
@@ -757,6 +784,9 @@ function ManualMealModal({ onClose, onAdd }: { onClose: () => void; onAdd: (meal
     date: getLocalDateKey(now),
     time: now.toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit", hour12: false }),
     note: "",
+    mealCategory: getTimeBasedMealCategory(
+      now.toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit", hour12: false }),
+    ) as string,
   })
 
   const updateField = (key: keyof typeof form, value: string) => {
@@ -781,6 +811,7 @@ function ManualMealModal({ onClose, onAdd }: { onClose: () => void; onAdd: (meal
       source: "manual",
       confidence: 100,
       note: form.note.trim(),
+      mealCategory: isMealCategory(form.mealCategory) ? form.mealCategory : getTimeBasedMealCategory(form.time),
     })
   }
 
@@ -804,6 +835,7 @@ function ManualMealModal({ onClose, onAdd }: { onClose: () => void; onAdd: (meal
           <EditField label="ไขมัน (g)" value={form.fat} onChange={(value) => updateField("fat", value)} type="number" />
           <EditField label="วันที่" value={form.date} onChange={(value) => updateField("date", value)} type="date" />
           <EditField label="เวลา" value={form.time} onChange={(value) => updateField("time", value)} type="time" />
+          <MealCategoryField value={form.mealCategory} onChange={(value) => updateField("mealCategory", value)} />
           <label className="block sm:col-span-2">
             <span className="text-xs font-bold text-neutral-500">โน้ต</span>
             <textarea
@@ -824,6 +856,25 @@ function ManualMealModal({ onClose, onAdd }: { onClose: () => void; onAdd: (meal
         </div>
       </div>
     </div>
+  )
+}
+
+function MealCategoryField({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  return (
+    <label className="block">
+      <span className="text-xs font-bold text-neutral-500">หมวดมื้ออาหาร</span>
+      <select
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="mt-1 h-10 w-full rounded-xl border border-neutral-200 bg-white px-3 text-sm outline-none focus:border-emerald-400"
+      >
+        {MEAL_CATEGORIES.map((category) => (
+          <option key={category} value={category}>
+            {MEAL_CATEGORY_LABELS[category]}
+          </option>
+        ))}
+      </select>
+    </label>
   )
 }
 

@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { SidebarProvider } from "@/context/SidebarContext";
 import { useSidebar } from "@/context/SidebarContext";
 import Sidebar from "@/components/ui/Sidebar/Sidebar";
+import type { UserSummary } from "@/components/ui/Useritem/Useritem";
 
 function LayoutFrame({ children, header }: { children: ReactNode; header: ReactNode }) {
   const { isSidebarOpen } = useSidebar();
@@ -21,16 +22,26 @@ function LayoutFrame({ children, header }: { children: ReactNode; header: ReactN
   );
 }
 
-export default function LayoutClient({ children, header }: { children: ReactNode; header: ReactNode }) {
+export default function LayoutClient({
+  children,
+  header,
+  user,
+}: {
+  children: ReactNode;
+  header: ReactNode;
+  user?: UserSummary | null;
+}) {
   const pathname = usePathname();
   const isAuthPage = pathname === "/sign-in" || pathname === "/sign-up";
   const isAdminPage = pathname.startsWith("/admin");
+  const isChatPage = pathname === "/chat";
+  const isOnboardingPage = pathname === "/onboarding";
 
-  if (isAuthPage || isAdminPage) return <>{children}</>;
+  if (isAuthPage || isAdminPage || isChatPage || isOnboardingPage) return <>{children}</>;
 
   return (
     <SidebarProvider>
-      <Sidebar />
+      <Sidebar user={user} />
       <LayoutFrame header={header}>{children}</LayoutFrame>
     </SidebarProvider>
   );

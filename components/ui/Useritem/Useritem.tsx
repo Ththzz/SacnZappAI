@@ -1,9 +1,8 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { ChevronDown, LogOut, ShieldCheck, UserRound } from "lucide-react"
-import { STORAGE_KEYS } from "@/lib/user-data"
 import {
   Dialog,
   DialogContent,
@@ -22,25 +21,10 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Button } from "@/components/ui/button"
 
-type UserSummary = {
+export type UserSummary = {
   name: string
   email: string
   role?: "user" | "admin"
-}
-
-function readUserSummary(): UserSummary {
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEYS.profile)
-    if (!raw) return { name: "ผู้ใช้", email: "" }
-
-    const stored = JSON.parse(raw) as { form?: { name?: unknown; email?: unknown } }
-    const name = typeof stored.form?.name === "string" && stored.form.name.trim() ? stored.form.name.trim() : "ผู้ใช้"
-    const email = typeof stored.form?.email === "string" && stored.form.email.trim() ? stored.form.email.trim() : ""
-
-    return { name, email }
-  } catch {
-    return { name: "ผู้ใช้", email: "" }
-  }
 }
 
 function getInitials(name: string) {
@@ -52,21 +36,11 @@ function getInitials(name: string) {
     .join("") || "TH"
 }
 
-const Useritem = ({ isSidebarOpen }: { isSidebarOpen: boolean }) => {
+const Useritem = ({ isSidebarOpen, initialUser }: { isSidebarOpen: boolean; initialUser?: UserSummary | null }) => {
   const router = useRouter()
-  const [user, setUser] = useState<UserSummary>({ name: "ผู้ใช้", email: "" })
+  const user = initialUser ?? { name: "ผู้ใช้", email: "" }
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [signingOut, setSigningOut] = useState(false)
-
-  useEffect(() => {
-    setUser(readUserSummary())
-    fetch("/api/auth/me")
-      .then((response) => response.json())
-      .then((data: { user?: UserSummary | null }) => {
-        if (data.user) setUser(data.user)
-      })
-      .catch(() => undefined)
-  }, [])
 
   const handleSignOut = async () => {
     setSigningOut(true)
