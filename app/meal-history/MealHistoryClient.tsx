@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import {
   AlertTriangle,
   ArrowLeft,
@@ -22,8 +22,10 @@ import {
   getLocalDateKey,
   getTimeBasedMealCategory,
   isMealCategory,
+  MEAL_HISTORY_UPDATED_EVENT,
   MEAL_CATEGORIES,
   MEAL_CATEGORY_LABELS,
+  notifyMealHistoryUpdated,
   readMealEntries,
   resolveMealCategory,
   type MealCategory,
@@ -70,6 +72,11 @@ type NutritionTargets = {
   fat: number
 }
 
+type MealHistoryCachePayload = {
+  historyMeals: DayMeal[]
+  targets: NutritionTargets | null
+}
+
 type AppSettingsPayload = {
   settings?: {
     healthGoal?: {
@@ -78,6 +85,9 @@ type AppSettingsPayload = {
     }
   } | null
 }
+
+const MEAL_HISTORY_CACHE_KEY = "scanzapp.meal-history.cache.v1"
+const MEAL_HISTORY_CACHE_MAX_AGE_MS = 5 * 60 * 1000
 
 function getCalorieStatus(calories: number, targetCalories?: number): WeekDaySummary["status"] {
   if (calories === 0) return "empty"
@@ -101,6 +111,28 @@ function deriveTargets(payload: AppSettingsPayload): NutritionTargets | null {
     protein,
     fat,
     carbs: protein > 0 && fat > 0 ? Math.max(0, Math.round(caloriesForCarbs / 4)) : 0,
+  }
+}
+
+function readHistoryCache() {
+  if (typeof window === "undefined") return null
+  try {
+    const raw = window.sessionStorage.getItem(MEAL_HISTORY_CACHE_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as { savedAt?: number; data?: MealHistoryCachePayload }
+    if (!parsed?.savedAt || Date.now() - parsed.savedAt > MEAL_HISTORY_CACHE_MAX_AGE_MS) return null
+    return parsed.data ?? null
+  } catch {
+    return null
+  }
+}
+
+function writeHistoryCache(data: MealHistoryCachePayload) {
+  if (typeof window === "undefined") return
+  try {
+    window.sessionStorage.setItem(MEAL_HISTORY_CACHE_KEY, JSON.stringify({ savedAt: Date.now(), data }))
+  } catch {
+    return
   }
 }
 
@@ -157,15 +189,16 @@ function buildMonthDays(meals: DayMeal[], targetCalories?: number): MonthDaySumm
 }
 
 export default function MealHistoryClient() {
+  const initialCache = readHistoryCache()
   const [activeView, setActiveView] = useState<ViewMode>("day")
   const [selectedMeal, setSelectedMeal] = useState<DayMeal | null>(null)
-  const [historyMeals, setHistoryMeals] = useState<DayMeal[]>([])
+  const [historyMeals, setHistoryMeals] = useState<DayMeal[]>(initialCache?.historyMeals ?? [])
   const [addingMeal, setAddingMeal] = useState(false)
-  const [targets, setTargets] = useState<NutritionTargets | null>(null)
+  const [targets, setTargets] = useState<NutritionTargets | null>(initialCache?.targets ?? null)
   const [historyError, setHistoryError] = useState<string | null>(null)
   const todayKey = getLocalDateKey()
 
-  useEffect(() => {
+  const loadHistoryData = useCallback(async () => {
     const now = new Date()
     const weekStart = new Date(now)
     weekStart.setDate(now.getDate() - 6)
@@ -188,7 +221,7 @@ export default function MealHistoryClient() {
       mealCategory: resolveMealCategory(item),
     }))
 
-    Promise.allSettled([
+    const [mealResult, settingsResult] = await Promise.allSettled([
       fetch(`/api/meals?from=${rangeStart}&to=${getLocalDateKey(now)}&limit=500`).then(async (response) => {
         const data = (await response.json().catch(() => ({}))) as { meals?: ReturnType<typeof readMealEntries> }
         if (!response.ok) throw new Error("api")
@@ -199,13 +232,52 @@ export default function MealHistoryClient() {
         if (!response.ok) throw new Error("settings")
         return data
       }),
-    ]).then(([mealResult, settingsResult]) => {
-      const loadedMeals = mealResult.status === "fulfilled" ? mealResult.value : []
-      setHistoryMeals(convertMeals(loadedMeals))
-      setTargets(settingsResult.status === "fulfilled" ? deriveTargets(settingsResult.value) : null)
-      setHistoryError(mealResult.status === "fulfilled" ? null : "โหลดมื้ออาหารจากเซิร์ฟเวอร์ไม่สำเร็จ กรุณาลองรีเฟรชอีกครั้ง")
-    })
+    ])
+
+    const loadedMeals = mealResult.status === "fulfilled" ? mealResult.value : []
+    const nextHistoryMeals = convertMeals(loadedMeals)
+    const nextTargets = settingsResult.status === "fulfilled" ? deriveTargets(settingsResult.value) : null
+    setHistoryMeals(nextHistoryMeals)
+    setTargets(nextTargets)
+    setHistoryError(mealResult.status === "fulfilled" ? null : "โหลดมื้ออาหารจากเซิร์ฟเวอร์ไม่สำเร็จ กรุณาลองรีเฟรชอีกครั้ง")
+    writeHistoryCache({ historyMeals: nextHistoryMeals, targets: nextTargets })
   }, [])
+
+  useEffect(() => {
+    void loadHistoryData()
+  }, [loadHistoryData])
+
+  useEffect(() => {
+    const handleFocus = () => {
+      void loadHistoryData()
+    }
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        void loadHistoryData()
+      }
+    }
+
+    const handlePageShow = () => {
+      void loadHistoryData()
+    }
+
+    window.addEventListener("focus", handleFocus)
+    window.addEventListener("pageshow", handlePageShow)
+    window.addEventListener(MEAL_HISTORY_UPDATED_EVENT, handleFocus)
+    document.addEventListener("visibilitychange", handleVisibilityChange)
+
+    return () => {
+      window.removeEventListener("focus", handleFocus)
+      window.removeEventListener("pageshow", handlePageShow)
+      window.removeEventListener(MEAL_HISTORY_UPDATED_EVENT, handleFocus)
+      document.removeEventListener("visibilitychange", handleVisibilityChange)
+    }
+  }, [loadHistoryData])
+
+  useEffect(() => {
+    writeHistoryCache({ historyMeals, targets })
+  }, [historyMeals, targets])
 
   const todayMeals = historyMeals.filter((meal) => meal.date === todayKey)
   const dailyCalories = todayMeals.reduce((total, meal) => total + meal.calories, 0)
@@ -227,6 +299,7 @@ export default function MealHistoryClient() {
         const payload = (await response.json().catch(() => null)) as { error?: string } | null
         throw new Error(payload?.error || "ลบมื้ออาหารไม่สำเร็จ")
       }
+      notifyMealHistoryUpdated()
     } catch (error) {
       setHistoryMeals(previousMeals)
       if (selectedMeal?.id === mealId) {
@@ -266,6 +339,7 @@ export default function MealHistoryClient() {
         const payload = (await response.json().catch(() => null)) as { error?: string } | null
         throw new Error(payload?.error || "อัปเดตมื้ออาหารไม่สำเร็จ")
       }
+      notifyMealHistoryUpdated()
     } catch (error) {
       setHistoryMeals(previousMeals)
       setSelectedMeal(previousSelectedMeal)
@@ -301,6 +375,7 @@ export default function MealHistoryClient() {
         const payload = (await response.json().catch(() => null)) as { error?: string } | null
         throw new Error(payload?.error || "บันทึกมื้ออาหารไม่สำเร็จ")
       }
+      notifyMealHistoryUpdated()
       setAddingMeal(false)
     } catch (error) {
       setHistoryMeals(previousMeals)

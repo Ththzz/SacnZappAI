@@ -21,6 +21,7 @@ import {
   getLocalDateKey,
   getTimeBasedMealCategory,
   MEAL_CATEGORY_LABELS,
+  notifyMealHistoryUpdated,
   type MealCategory,
 } from '@/lib/user-data'
 
@@ -348,6 +349,7 @@ export default function ScanPageClient() {
         throw new Error(payload?.error || 'บันทึกมื้ออาหารไม่สำเร็จ')
       }
 
+      notifyMealHistoryUpdated()
       setSaved(true)
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : 'บันทึกมื้ออาหารไม่สำเร็จ')

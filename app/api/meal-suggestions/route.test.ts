@@ -112,8 +112,8 @@ describe("meal suggestions cache", () => {
     expect(body.suggestions[0]).toMatchObject({ name: "ต้มยำปลา", carbs: 12, fat: 8 })
     expect(requestAiChat).toHaveBeenCalledTimes(1)
     expect(requestAiChat).toHaveBeenCalledWith(expect.objectContaining({
-      timeoutMs: 25_000,
-      maxTokens: 500,
+      timeoutMs: 12_000,
+      maxTokens: 320,
     }))
     expect(upsertCache).toHaveBeenCalledTimes(1)
   })
@@ -133,5 +133,17 @@ describe("meal suggestions cache", () => {
     expect(body.source).toBe("cache-stale")
     expect(body.isStale).toBe(true)
     expect(body.suggestions).toEqual(suggestions)
+  })
+
+  it("returns fallback suggestions when AI refresh fails without cache", async () => {
+    findCache.mockResolvedValue(null)
+    requestAiChat.mockRejectedValue(new Error("AI unavailable"))
+
+    const response = await POST()
+    const body = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(body.source).toBe("fallback")
+    expect(body.suggestions).toHaveLength(3)
   })
 })

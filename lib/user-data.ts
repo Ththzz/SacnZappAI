@@ -38,6 +38,8 @@ export const STORAGE_KEYS = {
   profile: "nutriscan.profile",
 } as const
 
+export const MEAL_HISTORY_UPDATED_EVENT = "scanzapp:meal-history-updated"
+
 function safeParse<T>(raw: string | null, fallback: T): T {
   if (!raw) return fallback
   try {
@@ -136,6 +138,11 @@ export function writeMealEntries(entries: MealEntry[]) {
 export function addMealEntry(entry: MealEntry) {
   const current = readMealEntries()
   writeMealEntries([entry, ...current])
+}
+
+export function notifyMealHistoryUpdated() {
+  if (typeof window === "undefined") return
+  window.dispatchEvent(new Event(MEAL_HISTORY_UPDATED_EVENT))
 }
 
 export function readWaterLogs(): WaterLogEntry[] {

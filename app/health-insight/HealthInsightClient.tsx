@@ -25,6 +25,7 @@ import {
   isMealCategory,
   MEAL_CATEGORIES,
   MEAL_CATEGORY_LABELS,
+  notifyMealHistoryUpdated,
   readMealEntries,
   readWaterLogs,
   type MealCategory,
@@ -79,6 +80,27 @@ type SettingsPayload = {
   } | null
 }
 
+type InsightCachePayload = {
+  mealCount: number
+  calorieGoal: number | null
+  calorieTrend: CalorieTrendPoint[]
+  foodAlerts: FoodAlert[]
+  macroBalance: MacroBalanceItem[]
+  savedSuggestions: SavedMealSuggestion[]
+}
+
+type SuggestionCachePayload = {
+  mealSuggestions: MealSuggestion[]
+  suggestionSource: string
+  suggestionGeneratedAt: string | null
+  suggestionStale: boolean
+  suggestionError: string | null
+}
+
+const INSIGHT_CACHE_KEY = "scanzapp.health-insight.cache.v1"
+const SUGGESTION_CACHE_KEY = "scanzapp.meal-suggestions.cache.v1"
+const CACHE_MAX_AGE_MS = 5 * 60 * 1000
+
 const chartHeight = 150
 function getCalorieGoal(payload: SettingsPayload): number | null {
   const calories = Number(payload.settings?.healthGoal?.dailyCalories)
@@ -96,23 +118,47 @@ function parseApiError(data: unknown, fallback: string) {
   return typeof message === "string" && message ? message : fallback
 }
 
+function readSessionCache<T>(key: string) {
+  if (typeof window === "undefined") return null
+  try {
+    const raw = window.sessionStorage.getItem(key)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as { savedAt?: number; data?: T }
+    if (!parsed?.savedAt || Date.now() - parsed.savedAt > CACHE_MAX_AGE_MS) return null
+    return parsed.data ?? null
+  } catch {
+    return null
+  }
+}
+
+function writeSessionCache<T>(key: string, data: T) {
+  if (typeof window === "undefined") return
+  try {
+    window.sessionStorage.setItem(key, JSON.stringify({ savedAt: Date.now(), data }))
+  } catch {
+    return
+  }
+}
+
 export default function HealthInsightClient() {
-  const [loading, setLoading] = useState(true)
-  const [suggestionLoading, setSuggestionLoading] = useState(true)
+  const initialInsightCache = readSessionCache<InsightCachePayload>(INSIGHT_CACHE_KEY)
+  const initialSuggestionCache = readSessionCache<SuggestionCachePayload>(SUGGESTION_CACHE_KEY)
+  const [loading, setLoading] = useState(!initialInsightCache)
+  const [suggestionLoading, setSuggestionLoading] = useState(!initialSuggestionCache)
   const [refreshing, setRefreshing] = useState(false)
   const [pageError, setPageError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
-  const [calorieTrend, setCalorieTrend] = useState<CalorieTrendPoint[]>([])
-  const [foodAlerts, setFoodAlerts] = useState<FoodAlert[]>([])
-  const [macroBalance, setMacroBalance] = useState<MacroBalanceItem[]>(defaultMacroBalance)
-  const [mealSuggestions, setMealSuggestions] = useState<MealSuggestion[]>([])
-  const [savedSuggestions, setSavedSuggestions] = useState<SavedMealSuggestion[]>([])
-  const [suggestionSource, setSuggestionSource] = useState("")
-  const [suggestionGeneratedAt, setSuggestionGeneratedAt] = useState<string | null>(null)
-  const [suggestionStale, setSuggestionStale] = useState(false)
-  const [suggestionError, setSuggestionError] = useState<string | null>(null)
-  const [mealCount, setMealCount] = useState(0)
-  const [calorieGoal, setCalorieGoal] = useState<number | null>(null)
+  const [calorieTrend, setCalorieTrend] = useState<CalorieTrendPoint[]>(initialInsightCache?.calorieTrend ?? [])
+  const [foodAlerts, setFoodAlerts] = useState<FoodAlert[]>(initialInsightCache?.foodAlerts ?? [])
+  const [macroBalance, setMacroBalance] = useState<MacroBalanceItem[]>(initialInsightCache?.macroBalance ?? defaultMacroBalance)
+  const [mealSuggestions, setMealSuggestions] = useState<MealSuggestion[]>(initialSuggestionCache?.mealSuggestions ?? [])
+  const [savedSuggestions, setSavedSuggestions] = useState<SavedMealSuggestion[]>(initialInsightCache?.savedSuggestions ?? [])
+  const [suggestionSource, setSuggestionSource] = useState(initialSuggestionCache?.suggestionSource ?? "")
+  const [suggestionGeneratedAt, setSuggestionGeneratedAt] = useState<string | null>(initialSuggestionCache?.suggestionGeneratedAt ?? null)
+  const [suggestionStale, setSuggestionStale] = useState(initialSuggestionCache?.suggestionStale ?? false)
+  const [suggestionError, setSuggestionError] = useState<string | null>(initialSuggestionCache?.suggestionError ?? null)
+  const [mealCount, setMealCount] = useState(initialInsightCache?.mealCount ?? 0)
+  const [calorieGoal, setCalorieGoal] = useState<number | null>(initialInsightCache?.calorieGoal ?? null)
   const [convertingMeal, setConvertingMeal] = useState<SavedMealSuggestion | null>(null)
   const initialLoadStarted = useRef(false)
 
@@ -131,6 +177,13 @@ export default function HealthInsightClient() {
       setSuggestionGeneratedAt(payload.generatedAt ?? null)
       setSuggestionStale(Boolean(payload.isStale))
       setSuggestionError(payload.error ?? null)
+      writeSessionCache<SuggestionCachePayload>(SUGGESTION_CACHE_KEY, {
+        mealSuggestions: payload.suggestions ?? [],
+        suggestionSource: payload.source ?? "",
+        suggestionGeneratedAt: payload.generatedAt ?? null,
+        suggestionStale: Boolean(payload.isStale),
+        suggestionError: payload.error ?? null,
+      })
     } catch (error) {
       setSuggestionError(error instanceof Error ? error.message : "โหลดคำแนะนำไม่สำเร็จ")
     } finally {
@@ -176,11 +229,14 @@ export default function HealthInsightClient() {
       .filter((log) => log.date === dateKeys[6])
       .reduce((sum, log) => sum + log.amount, 0)
 
+    const nextCalorieTrend = buildCalorieTrend(recentMeals, goal)
+    const nextMacroBalance = buildMacroBalance(recentMeals)
     setMealCount(recentMeals.length)
     setCalorieGoal(goal)
-    setCalorieTrend(buildCalorieTrend(recentMeals, goal))
-    setMacroBalance(buildMacroBalance(recentMeals))
+    setCalorieTrend(nextCalorieTrend)
+    setMacroBalance(nextMacroBalance)
 
+    const nextSavedSuggestions = savedResult.status === "fulfilled" ? savedResult.value : savedSuggestions
     if (savedResult.status === "fulfilled") {
       setSavedSuggestions(savedResult.value)
     }
@@ -212,8 +268,16 @@ export default function HealthInsightClient() {
       iconClass: todayWaterMl > 0 ? "text-emerald-500" : "text-sky-500",
     })
     setFoodAlerts(alerts)
+    writeSessionCache<InsightCachePayload>(INSIGHT_CACHE_KEY, {
+      mealCount: recentMeals.length,
+      calorieGoal: goal,
+      calorieTrend: nextCalorieTrend,
+      foodAlerts: alerts,
+      macroBalance: nextMacroBalance,
+      savedSuggestions: nextSavedSuggestions,
+    })
     setLoading(false)
-  }, [])
+  }, [savedSuggestions])
 
   useEffect(() => {
     if (initialLoadStarted.current) return
@@ -221,6 +285,29 @@ export default function HealthInsightClient() {
     void loadInsightData()
     void loadSuggestionData()
   }, [loadInsightData, loadSuggestionData])
+
+  useEffect(() => {
+    if (loading) return
+    writeSessionCache<InsightCachePayload>(INSIGHT_CACHE_KEY, {
+      mealCount,
+      calorieGoal,
+      calorieTrend,
+      foodAlerts,
+      macroBalance,
+      savedSuggestions,
+    })
+  }, [loading, mealCount, calorieGoal, calorieTrend, foodAlerts, macroBalance, savedSuggestions])
+
+  useEffect(() => {
+    if (suggestionLoading) return
+    writeSessionCache<SuggestionCachePayload>(SUGGESTION_CACHE_KEY, {
+      mealSuggestions,
+      suggestionSource,
+      suggestionGeneratedAt,
+      suggestionStale,
+      suggestionError,
+    })
+  }, [suggestionLoading, mealSuggestions, suggestionSource, suggestionGeneratedAt, suggestionStale, suggestionError])
 
   const savedNames = useMemo(
     () => new Set(savedSuggestions.map((suggestion) => normalizedName(suggestion.name))),
@@ -272,6 +359,7 @@ export default function HealthInsightClient() {
     setConvertingMeal(null)
     setSavedSuggestions((current) => current.filter((item) => item.id !== meal.id))
     setNotice(`เพิ่ม “${form.name}” ลงในประวัติมื้ออาหารแล้ว`)
+    notifyMealHistoryUpdated()
     await loadInsightData()
     void loadSuggestionData(true)
   }

@@ -16,6 +16,13 @@ type MealSuggestion = {
   reason: string
 }
 
+type MealMacroTotals = {
+  calories: number
+  protein: number
+  carbs: number
+  fat: number
+}
+
 export const maxDuration = 60
 
 const bangkokTimeZone = "Asia/Bangkok"
@@ -87,6 +94,78 @@ function parseCachedSuggestions(raw: string | undefined) {
   }
 }
 
+function summarizeTotals(meals: Awaited<ReturnType<typeof loadRecentMeals>>): MealMacroTotals {
+  return meals.reduce(
+    (sum, meal) => ({
+      calories: sum.calories + meal.calories,
+      protein: sum.protein + meal.protein,
+      carbs: sum.carbs + meal.carbs,
+      fat: sum.fat + meal.fat,
+    }),
+    { calories: 0, protein: 0, carbs: 0, fat: 0 },
+  )
+}
+
+function buildFallbackSuggestions(input: {
+  meals: Awaited<ReturnType<typeof loadRecentMeals>>
+  dailyCalories: number | null
+}) {
+  const totals = summarizeTotals(input.meals)
+  const dayCount = Math.max(1, getBangkokSevenDayKeys().length)
+  const averageCalories = totals.calories / dayCount
+  const averageProtein = totals.protein / dayCount
+  const averageCarbs = totals.carbs / dayCount
+  const averageFat = totals.fat / dayCount
+  const calorieGap = input.dailyCalories ? input.dailyCalories - averageCalories : 0
+
+  const options: MealSuggestion[] = [
+    {
+      id: randomUUID(),
+      name: "ข้าวอกไก่ย่าง + ไข่ต้ม",
+      calories: 420,
+      protein: 34,
+      carbs: 42,
+      fat: 10,
+      reason: averageProtein < 75 ? "ช่วยเพิ่มโปรตีนจากค่าเฉลี่ยช่วง 7 วันที่ยังค่อนข้างต่ำ" : "เป็นมื้อสมดุล กินต่อได้ง่ายและคุมแคลอรี่ได้ดี",
+    },
+    {
+      id: randomUUID(),
+      name: "โยเกิร์ตกรีก + กล้วย + อัลมอนด์",
+      calories: 280,
+      protein: 18,
+      carbs: 30,
+      fat: 9,
+      reason: calorieGap < 250 ? "เหมาะเป็นมื้อเบาระหว่างวันเมื่อไม่อยากเพิ่มแคลอรี่มากเกินไป" : "เติมพลังงานแบบไม่หนักเกินและช่วยให้อิ่มนานขึ้น",
+    },
+    {
+      id: randomUUID(),
+      name: "สลัดทูน่า + มันหวาน",
+      calories: 360,
+      protein: 28,
+      carbs: 32,
+      fat: 11,
+      reason: averageFat > averageCarbs * 0.6 ? "ช่วยบาลานซ์มื้อถัดไปให้เบาขึ้นและได้ใยอาหารเพิ่ม" : "เป็นตัวเลือกที่สมดุลทั้งโปรตีน คาร์บ และไขมัน",
+    },
+    {
+      id: randomUUID(),
+      name: "ข้าวกล้องปลาแซลมอน + ผักลวก",
+      calories: 490,
+      protein: 32,
+      carbs: 44,
+      fat: 18,
+      reason: calorieGap > 350 ? "เหมาะเมื่อพลังงานเฉลี่ยช่วงนี้ยังต่ำกว่าเป้าหมายค่อนข้างมาก" : "ช่วยเติมพลังงานพร้อมไขมันดีและโปรตีนคุณภาพ",
+    },
+  ]
+
+  return options
+    .sort((first, second) => {
+      const firstDiff = Math.abs(first.calories - Math.max(280, calorieGap || first.calories))
+      const secondDiff = Math.abs(second.calories - Math.max(280, calorieGap || second.calories))
+      return firstDiff - secondDiff
+    })
+    .slice(0, 3)
+}
+
 async function createSuggestions(userId: string, meals: Awaited<ReturnType<typeof loadRecentMeals>>) {
   const apiKey = process.env.QWEN_API_KEY
   const model = process.env.QWEN_MODEL?.trim() || defaultAiModel
@@ -102,15 +181,7 @@ async function createSuggestions(userId: string, meals: Awaited<ReturnType<typeo
     dailyCalories = null
   }
 
-  const totals = meals.reduce(
-    (sum, meal) => ({
-      calories: sum.calories + meal.calories,
-      protein: sum.protein + meal.protein,
-      carbs: sum.carbs + meal.carbs,
-      fat: sum.fat + meal.fat,
-    }),
-    { calories: 0, protein: 0, carbs: 0, fat: 0 },
-  )
+  const totals = summarizeTotals(meals)
   const mealSummary = meals
     .map((meal) => `${meal.date} ${meal.time}: ${meal.name}, ${meal.calories} kcal, protein ${meal.protein}g, carbs ${meal.carbs}g, fat ${meal.fat}g`)
     .join("\n")
@@ -118,13 +189,13 @@ async function createSuggestions(userId: string, meals: Awaited<ReturnType<typeo
   const completion = await requestAiChat({
     apiKey,
     model,
-    timeoutMs: 25_000,
-    maxTokens: 500,
+    timeoutMs: 12_000,
+    maxTokens: 320,
     messages: [
       {
         role: "system",
         content:
-          "You are ScanZapp AI nutrition assistant. Suggest practical next meals in Thai from the user's real seven-day meal history. Estimate nutrition conservatively per serving. Return ONLY a valid JSON array.",
+          "You are ScanZapp AI nutrition assistant. Suggest 3 practical Thai next meals from the user's real seven-day meal history. Estimate nutrition conservatively per serving. Return ONLY a valid JSON array with short reasons.",
       },
       {
         role: "user",
@@ -221,6 +292,17 @@ async function handleSuggestions(forceRefresh: boolean) {
       }
 
       const missingKey = error instanceof Error && error.message === "QWEN_API_KEY_MISSING"
+      if (!missingKey) {
+        const fallbackSuggestions = buildFallbackSuggestions({ meals, dailyCalories: null })
+        return NextResponse.json({
+          suggestions: fallbackSuggestions,
+          source: "fallback",
+          generatedAt: null,
+          isStale: false,
+          error: error instanceof Error ? error.message : "สร้างคำแนะนำไม่สำเร็จ",
+        })
+      }
+
       const message = error instanceof AiProviderError ? error.message : missingKey ? "ยังไม่ได้ตั้งค่า QWEN_API_KEY" : "สร้างคำแนะนำไม่สำเร็จ"
       return NextResponse.json({
         suggestions: [],
