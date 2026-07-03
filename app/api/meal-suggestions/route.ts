@@ -16,6 +16,8 @@ type MealSuggestion = {
   reason: string
 }
 
+export const maxDuration = 60
+
 const bangkokTimeZone = "Asia/Bangkok"
 const dayMs = 24 * 60 * 60 * 1000
 const globalSuggestionJobs = globalThis as typeof globalThis & {

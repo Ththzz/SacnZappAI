@@ -25,7 +25,8 @@ export default function ChunkLoadRecovery() {
         if (window.sessionStorage.getItem(recoveryKey)) return
         window.sessionStorage.setItem(recoveryKey, String(Date.now()))
       } catch {
-        // A reload is still the safest recovery when sessionStorage is unavailable.
+        // Without a persistent marker, reloading could create an infinite loop.
+        return
       }
 
       window.location.reload()

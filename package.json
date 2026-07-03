@@ -2,15 +2,23 @@
   "name": "nutriscan",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": "22.x"
+  },
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "node scripts/validate-deploy-env.mjs && node scripts/prisma-schema.mjs generate && next build",
+    "postinstall": "node scripts/prisma-schema.mjs generate",
     "start": "next start",
     "lint": "eslint",
-    "test": "vitest run",
-    "db:migrate": "node scripts/db-migrate.mjs && prisma generate",
-    "db:generate": "prisma generate",
-    "db:seed": "npm run db:migrate && node scripts/db-seed.mjs"
+    "test": "node scripts/prisma-schema.mjs sqlite generate && vitest run",
+    "db:generate": "node scripts/prisma-schema.mjs generate",
+    "db:migrate": "node scripts/prisma-schema.mjs postgres migrate deploy",
+    "db:migrate:dev": "node scripts/prisma-schema.mjs postgres migrate dev",
+    "db:sqlite:migrate": "node scripts/db-migrate.mjs && node scripts/prisma-schema.mjs sqlite generate",
+    "db:seed": "node scripts/db-seed.mjs",
+    "admin:promote": "node scripts/promote-admin.mjs",
+    "deploy:smoke": "node scripts/smoke-test.mjs"
   },
   "dependencies": {
     "@prisma/client": "6.19.3",

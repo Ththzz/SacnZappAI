@@ -20,7 +20,7 @@ vi.mock("@/lib/chat/repository", () => ({
 
 vi.mock("@/lib/ai/food-analysis", () => ({
   analyzeFoodImage,
-  MAX_FOOD_IMAGE_BYTES: 8 * 1024 * 1024,
+  MAX_FOOD_IMAGE_BYTES: 3 * 1024 * 1024,
 }))
 
 import { POST } from "./route"

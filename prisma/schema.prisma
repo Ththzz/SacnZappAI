@@ -61,6 +61,16 @@ model UserSettings {
   @@map("user_settings")
 }
 
+model RateLimitBucket {
+  key       String   @id
+  count     Int
+  resetAt   DateTime @map("reset_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([resetAt])
+  @@map("rate_limit_buckets")
+}
+
 model Meal {
   id          String       @id
   userId      String       @map("user_id")

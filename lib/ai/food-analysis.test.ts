@@ -24,6 +24,6 @@ describe("parseFoodImageDataUrl", () => {
     const encodedLength = Math.ceil(((MAX_FOOD_IMAGE_BYTES + 1) * 4) / 3 / 4) * 4
     const result = parseFoodImageDataUrl(`data:image/jpeg;base64,${"A".repeat(encodedLength)}`)
 
-    expect(result).toEqual({ error: "รูปภาพต้องมีขนาดไม่เกิน 8MB" })
+    expect(result).toEqual({ error: "รูปภาพหลังปรับขนาดต้องไม่เกิน 3MB" })
   })
 })

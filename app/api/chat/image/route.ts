@@ -11,6 +11,8 @@ import { readJsonBodyWithLimit } from "@/lib/request-body"
 
 const maxRequestBodyBytes = Math.ceil((MAX_FOOD_IMAGE_BYTES * 4) / 3) + 1024
 
+export const maxDuration = 90
+
 function readString(value: unknown) {
   return typeof value === "string" ? value.trim() : ""
 }
@@ -21,7 +23,7 @@ export async function POST(request: Request) {
 
   try {
     const user = await requireUser()
-    const rateLimit = checkRateLimit(`ai:chat-image:${user.id}`, {
+    const rateLimit = await checkRateLimit(`ai:chat-image:${user.id}`, {
       limit: 20,
       windowMs: 60 * 60 * 1000,
     })
@@ -35,7 +37,7 @@ export async function POST(request: Request) {
     const parsedBody = await readJsonBodyWithLimit<Record<string, unknown>>(
       request,
       maxRequestBodyBytes,
-      "รูปภาพต้องมีขนาดไม่เกิน 8MB",
+      "รูปภาพหลังปรับขนาดต้องไม่เกิน 3MB",
     )
     if ("error" in parsedBody) {
       throw new ChatApiError(413, "UNSUPPORTED_IMAGE", parsedBody.error, { requestId })

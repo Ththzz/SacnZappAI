@@ -11,6 +11,8 @@ import { readJsonBodyWithLimit } from "@/lib/request-body"
 const isDevelopment = process.env.NODE_ENV === "development"
 const maxRequestBodyBytes = Math.ceil((MAX_FOOD_IMAGE_BYTES * 4) / 3) + 1024
 
+export const maxDuration = 90
+
 function logScanFoodDebug(message: string, details?: Record<string, unknown>) {
   if (!isDevelopment) return
   console.info("[scan-food]", message, details ?? "")
@@ -76,7 +78,7 @@ export async function POST(request: Request) {
   } catch (error) {
     return jsonError(error)
   }
-  const rateLimit = checkRateLimit(`ai:scan:${user.id}`, {
+  const rateLimit = await checkRateLimit(`ai:scan:${user.id}`, {
     limit: 20,
     windowMs: 60 * 60 * 1000,
   })
@@ -106,7 +108,7 @@ export async function POST(request: Request) {
   const parsedBody = await readJsonBodyWithLimit<{ image?: unknown }>(
     request,
     maxRequestBodyBytes,
-    "รูปภาพต้องมีขนาดไม่เกิน 8MB",
+    "รูปภาพหลังปรับขนาดต้องไม่เกิน 3MB",
   )
   if ("error" in parsedBody) {
     return NextResponse.json({ error: parsedBody.error }, { status: parsedBody.status })

@@ -64,7 +64,7 @@ describe("scan-food route", () => {
     const body = await readJson(response)
 
     expect(response.status).toBe(413)
-    expect(body.error).toContain("8MB")
+    expect(body.error).toContain("3MB")
   })
 
   it("rejects requests without a configured API key", async () => {

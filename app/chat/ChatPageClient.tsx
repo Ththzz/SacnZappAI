@@ -114,7 +114,7 @@ const optionalConsentScopes = [
 ] as const
 
 const maxImageSize = 10 * 1024 * 1024
-const maxImageUploadSize = 8 * 1024 * 1024
+const maxImageUploadSize = 3 * 1024 * 1024
 const maxImageDimension = 1600
 
 function parseApiError(data: unknown, fallback: string) {
@@ -492,7 +492,7 @@ export default function ChatPageClient({ userName }: { userName: string }) {
     try {
       const optimized = await optimizeChatImage(file)
       if (optimized.size > maxImageUploadSize) {
-        setPageError("ไม่สามารถลดขนาดรูปให้ต่ำกว่า 8MB ได้ กรุณาเลือกรูปที่เล็กลง")
+        setPageError("ไม่สามารถลดขนาดรูปให้ต่ำกว่า 3MB ได้ กรุณาเลือกรูปที่เล็กลง")
         return
       }
       const dataUrl = await readFileAsDataUrl(optimized)

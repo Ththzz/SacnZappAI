@@ -1,6 +1,6 @@
 // @vitest-environment node
 
-import { mkdtempSync, readFileSync, rmSync } from "node:fs"
+import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -24,7 +24,6 @@ import {
 } from "./repository"
 
 const rootDir = join(dirname(fileURLToPath(import.meta.url)), "..", "..")
-const schemaSql = readFileSync(join(rootDir, "data", "schema.sql"), "utf8")
 const require = createRequire(import.meta.url)
 const { PrismaClient } = require("@prisma/client") as {
   PrismaClient: new (options?: { datasources?: { db?: { url?: string } } }) => ChatDbClient & {
@@ -54,13 +53,13 @@ type TestContext = {
 async function createTestContext(): Promise<TestContext> {
   const dbDir = mkdtempSync(join(tmpdir(), "scanzapp-chat-"))
   const dbPath = join(dbDir, "test.db")
-  const init = spawnSync("sqlite3", [dbPath], {
-    input: schemaSql,
-    stdio: ["pipe", "ignore", "pipe"],
+  const init = spawnSync(process.execPath, [join(rootDir, "scripts", "db-migrate.mjs")], {
+    env: { ...process.env, SQLITE_DATABASE_PATH: dbPath },
+    stdio: ["ignore", "ignore", "pipe"],
   })
 
   if (init.status !== 0) {
-    throw new Error(`sqlite3 failed: ${init.stderr.toString()}`)
+    throw new Error(`SQLite migration failed: ${init.stderr.toString()}`)
   }
 
   const prisma = new PrismaClient({

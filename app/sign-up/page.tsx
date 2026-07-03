@@ -7,11 +7,8 @@ import { ArrowRight, LoaderCircle, UserPlus } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import AuthShell from "@/components/auth/AuthShell"
 
-type Role = "user" | "admin"
-
 export default function SignUpPage() {
   const router = useRouter()
-  const [role, setRole] = useState<Role>("user")
   const [error, setError] = useState("")
   const [loading, setLoading] = useState(false)
 
@@ -28,8 +25,6 @@ export default function SignUpPage() {
         name: form.get("name"),
         email: form.get("email"),
         password: form.get("password"),
-        role,
-        adminCode: form.get("adminCode"),
       }),
     })
     const data = (await response.json().catch(() => ({}))) as { error?: string }
@@ -40,7 +35,7 @@ export default function SignUpPage() {
       return
     }
 
-    router.replace(role === "admin" ? "/admin" : "/onboarding")
+    router.replace("/onboarding")
     router.refresh()
   }
 
@@ -54,25 +49,9 @@ export default function SignUpPage() {
         </div>
 
         <form className="space-y-4" onSubmit={handleSubmit}>
-          <div className="grid grid-cols-2 rounded-xl bg-neutral-100 p-1">
-            {(["user", "admin"] as const).map((item) => (
-              <button
-                key={item}
-                type="button"
-                onClick={() => setRole(item)}
-                className={`h-10 rounded-lg text-sm font-bold transition-colors ${
-                  role === item ? "bg-white text-emerald-600 shadow-sm" : "text-neutral-500"
-                }`}
-              >
-                {item === "user" ? "ยูสเซอร์" : "แอดมิน"}
-              </button>
-            ))}
-          </div>
-
           <Field label="ชื่อ" name="name" type="text" autoComplete="name" />
           <Field label="อีเมล" name="email" type="email" autoComplete="email" />
           <Field label="รหัสผ่าน" name="password" type="password" autoComplete="new-password" />
-          {role === "admin" && <Field label="รหัสสมัครแอดมิน" name="adminCode" type="password" autoComplete="off" optional />}
 
           {error && <div className="rounded-xl bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-600">{error}</div>}
 
@@ -99,19 +78,17 @@ function Field({
   name,
   type,
   autoComplete,
-  optional = false,
 }: {
   label: string
   name: string
   type: string
   autoComplete: string
-  optional?: boolean
 }) {
   return (
     <label className="block">
       <span className="text-sm font-bold text-neutral-700">{label}</span>
       <input
-        required={!optional}
+        required
         name={name}
         type={type}
         autoComplete={autoComplete}

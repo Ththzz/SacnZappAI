@@ -58,7 +58,7 @@ const processingSteps = [
 ] as const
 
 const maxFileSize = 10 * 1024 * 1024
-const maxUploadBytes = 8 * 1024 * 1024
+const maxUploadBytes = 3 * 1024 * 1024
 const maxImageDimension = 1600
 const modelLabel = process.env.NEXT_PUBLIC_AI_MODEL?.trim() || 'qwen/qwen3.7-plus'
 
@@ -230,7 +230,7 @@ export default function ScanPageClient() {
     const optimized = await optimizeFoodImage(file)
     if (optimized.size > maxUploadBytes) {
       replacePreview(null)
-      setError('ไม่สามารถลดขนาดรูปให้ต่ำกว่า 8MB ได้ กรุณาเลือกรูปที่เล็กลง')
+      setError('ไม่สามารถลดขนาดรูปให้ต่ำกว่า 3MB ได้ กรุณาเลือกรูปที่เล็กลง')
       return
     }
     const image = await readFileAsDataUrl(optimized)

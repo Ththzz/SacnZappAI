@@ -9,6 +9,8 @@ import { getTimeBasedMealCategory } from "@/lib/user-data"
 
 const batchSize = 50
 
+export const maxDuration = 60
+
 export async function POST() {
   try {
     const user = await requireUser()

@@ -167,12 +167,3 @@ export async function requireAdmin() {
   }
   return user
 }
-
-export function canCreateAdmin(adminCode?: string) {
-  const expected = process.env.ADMIN_SIGNUP_CODE?.trim()
-  return Boolean(expected) && adminCode === expected
-}
-
-export function isAdminSignupConfigured() {
-  return Boolean(process.env.ADMIN_SIGNUP_CODE?.trim())
-}

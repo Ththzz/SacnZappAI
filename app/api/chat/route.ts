@@ -12,6 +12,7 @@ import {
   getAssistantMessageForUserMessage,
   getConversationById,
   getMessageByClientRequestId,
+  getMessageById,
   listRecentMessagesForConversation,
   type ChatDbClient,
   touchConversation,
@@ -27,6 +28,8 @@ type ChatRequestBody = {
   clientRequestId?: unknown
   contextNote?: unknown
 }
+
+export const maxDuration = 90
 
 function readString(value: unknown) {
   return typeof value === "string" ? value.trim() : ""
@@ -82,7 +85,7 @@ export async function POST(request: Request) {
 
   try {
     const user = await requireUser()
-    const rateLimit = checkRateLimit(`ai:chat:${user.id}`, {
+    const rateLimit = await checkRateLimit(`ai:chat:${user.id}`, {
       limit: 30,
       windowMs: 10 * 60 * 1000,
     })
@@ -214,6 +217,8 @@ export async function POST(request: Request) {
 
     let generationController: AbortController | null = null
     let streamCanceled = false
+    let stopPoll: ReturnType<typeof setInterval> | null = null
+    let stopPollRunning = false
 
     return new Response(
       new ReadableStream({
@@ -252,6 +257,18 @@ export async function POST(request: Request) {
           try {
             const abortController = createChatAbortController(assistantMessage.id)
             generationController = abortController
+            stopPoll = setInterval(() => {
+              if (closed || stopPollRunning) return
+              stopPollRunning = true
+              void getMessageById(chatDb, user.id, assistantMessage.id, activeConversationId)
+                .then((message) => {
+                  if (message?.status === "stopped") abortController.abort()
+                })
+                .catch(() => undefined)
+                .finally(() => {
+                  stopPollRunning = false
+                })
+            }, 1_000)
             const abortFromClient = () => abortController.abort()
             request.signal.addEventListener("abort", abortFromClient, { once: true })
             const completion = await requestChatCompletion({
@@ -333,6 +350,7 @@ export async function POST(request: Request) {
             })
           } finally {
             clearInterval(heartbeat)
+            if (stopPoll) clearInterval(stopPoll)
             clearActiveChat(assistantMessage.id)
             closed = true
             if (!streamCanceled) controller.close()

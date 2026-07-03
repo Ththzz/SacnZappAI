@@ -13,7 +13,9 @@ export type FoodAnalysis = {
   mealKind: "main_meal" | "snack"
 }
 
-export const MAX_FOOD_IMAGE_BYTES = 8 * 1024 * 1024
+// Base64 adds roughly 33% overhead. Keep the encoded JSON request below
+// Vercel Functions' 4.5 MB request payload limit.
+export const MAX_FOOD_IMAGE_BYTES = 3 * 1024 * 1024
 
 const imageDataUrlPrefixPattern = /^data:(image\/(?:png|jpe?g|webp|heic|heif));base64,/i
 
@@ -38,7 +40,7 @@ export function parseFoodImageDataUrl(image: unknown): { mimeType: string; image
   }
 
   if (getDecodedBase64Size(imageData) > MAX_FOOD_IMAGE_BYTES) {
-    return { error: "รูปภาพต้องมีขนาดไม่เกิน 8MB" }
+    return { error: "รูปภาพหลังปรับขนาดต้องไม่เกิน 3MB" }
   }
 
   return {

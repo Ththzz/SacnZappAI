@@ -5,7 +5,7 @@ import { checkRateLimit, getClientIp } from "@/lib/rate-limit"
 
 export async function POST(request: Request) {
   try {
-    const rateLimit = checkRateLimit(`auth:sign-in:${getClientIp(request)}`, {
+    const rateLimit = await checkRateLimit(`auth:sign-in:${getClientIp(request)}`, {
       limit: 10,
       windowMs: 15 * 60 * 1000,
     })

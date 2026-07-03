@@ -1,6 +1,11 @@
 import { pbkdf2Sync, randomBytes } from "node:crypto"
 import { PrismaClient } from "@prisma/client"
 
+if (/^postgres(?:ql)?:\/\//i.test(process.env.DATABASE_URL ?? "")) {
+  console.error("Demo seed is disabled for PostgreSQL. Create a normal account and use npm run admin:promote instead.")
+  process.exit(1)
+}
+
 const prisma = new PrismaClient()
 
 function hashPassword(password) {

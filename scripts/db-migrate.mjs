@@ -1,10 +1,12 @@
 import { spawnSync } from "node:child_process"
 import { mkdirSync } from "node:fs"
-import { dirname, join } from "node:path"
+import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..")
-const dbPath = join(root, "data", "scanzapp-prisma.db")
+const dbPath = process.env.SQLITE_DATABASE_PATH
+  ? resolve(process.env.SQLITE_DATABASE_PATH)
+  : join(root, "data", "scanzapp-prisma.db")
 
 mkdirSync(dirname(dbPath), { recursive: true })
 
@@ -43,6 +45,13 @@ CREATE TABLE IF NOT EXISTS "user_settings" (
   "settings_json" TEXT NOT NULL,
   "updated_at" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT "user_settings_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS "rate_limit_buckets" (
+  "key" TEXT NOT NULL PRIMARY KEY,
+  "count" INTEGER NOT NULL,
+  "reset_at" DATETIME NOT NULL,
+  "updated_at" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS "meals" (
@@ -183,6 +192,7 @@ CREATE TABLE IF NOT EXISTS "chat_usages" (
 
 CREATE INDEX IF NOT EXISTS "meals_user_id_date_idx" ON "meals"("user_id", "date");
 CREATE INDEX IF NOT EXISTS "water_logs_user_id_date_idx" ON "water_logs"("user_id", "date");
+CREATE INDEX IF NOT EXISTS "rate_limit_buckets_reset_at_idx" ON "rate_limit_buckets"("reset_at");
 CREATE INDEX IF NOT EXISTS "scan_results_created_at_idx" ON "scan_results"("created_at");
 CREATE INDEX IF NOT EXISTS "scan_results_user_id_created_at_idx" ON "scan_results"("user_id", "created_at");
 CREATE UNIQUE INDEX IF NOT EXISTS "saved_meal_suggestions_user_id_normalized_name_key" ON "saved_meal_suggestions"("user_id", "normalized_name");
