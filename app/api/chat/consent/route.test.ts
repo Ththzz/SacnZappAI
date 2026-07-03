@@ -80,4 +80,15 @@ describe("chat consent route", () => {
     })
     expect(grantChatConsent).not.toHaveBeenCalled()
   })
+
+  it("returns the current user name with consent bootstrap data", async () => {
+    requireUser.mockResolvedValue({ id: "user-1", name: "สมชาย" })
+    listActiveChatConsents.mockResolvedValue([])
+
+    const response = await GET(new Request("http://localhost/api/chat/consent"))
+    const body = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(body.user).toEqual({ name: "สมชาย" })
+  })
 })

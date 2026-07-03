@@ -20,6 +20,7 @@ export async function GET(request: Request) {
 
     return NextResponse.json({
       policyVersion: CHAT_POLICY_VERSION,
+      user: { name: user.name },
       items: items.map((item: { scope: string; grantedAt: Date; uiVersion: string | null }) => ({
         scope: item.scope,
         grantedAt: item.grantedAt.toISOString(),

@@ -189,7 +189,8 @@ async function optimizeChatImage(file: File): Promise<Blob> {
   }
 }
 
-export default function ChatPageClient({ userName }: { userName: string }) {
+export default function ChatPageClient() {
+  const [userName, setUserName] = useState("ผู้ใช้งาน")
   const [consents, setConsents] = useState<ConsentItem[]>([])
   const [consentLoading, setConsentLoading] = useState(true)
   const [grantingConsent, setGrantingConsent] = useState(false)
@@ -285,14 +286,22 @@ export default function ChatPageClient({ userName }: { userName: string }) {
   async function loadConsent() {
     setConsentLoading(true)
     const response = await fetch("/api/chat/consent")
-    const data = (await response.json().catch(() => ({}))) as { items?: ConsentItem[] }
+    const data = (await response.json().catch(() => ({}))) as {
+      items?: ConsentItem[]
+      user?: { name?: string }
+    }
     setConsentLoading(false)
 
     if (!response.ok) {
+      if (response.status === 401) {
+        window.location.assign("/sign-in?next=/chat")
+        return
+      }
       setPageError(parseApiError(data, "โหลดการยินยอมไม่สำเร็จ"))
       return
     }
 
+    if (data.user?.name) setUserName(data.user.name)
     setConsents(data.items ?? [])
   }
 
@@ -324,13 +333,19 @@ export default function ChatPageClient({ userName }: { userName: string }) {
 
     const url = new URL("/api/chat/conversations", window.location.origin)
     url.searchParams.set("status", "active")
+    if (!search.trim() && !currentConversation) {
+      url.searchParams.set("includeFirst", "true")
+    }
     if (search.trim()) {
       url.searchParams.set("q", search.trim())
     }
 
     try {
       const response = await fetch(url.toString(), { signal: controller.signal })
-      const data = (await response.json().catch(() => ({}))) as { items?: ConversationSummary[] }
+      const data = (await response.json().catch(() => ({}))) as {
+        items?: ConversationSummary[]
+        initialConversation?: ConversationDetail | null
+      }
       if (!response.ok) {
         throw new Error(parseApiError(data, "โหลดรายการบทสนทนาไม่สำเร็จ"))
       }
@@ -339,7 +354,12 @@ export default function ChatPageClient({ userName }: { userName: string }) {
       setConversations(items)
 
       if (!currentConversation && items[0]) {
-        await openConversation(items[0].id, items[0])
+        if (data.initialConversation?.conversation.id === items[0].id) {
+          setCurrentConversation(items[0])
+          setMessages(data.initialConversation.messages ?? [])
+        } else {
+          await openConversation(items[0].id, items[0])
+        }
       }
 
       if (currentConversation) {

@@ -2,9 +2,9 @@ import { NextResponse } from "next/server"
 
 import { requireUser } from "@/lib/auth"
 import { prisma } from "@/lib/db"
-import { CHAT_CONVERSATION_PAGE_SIZE, CHAT_TITLE_MAX_LENGTH } from "@/lib/chat/config"
+import { CHAT_CONVERSATION_PAGE_SIZE, CHAT_MESSAGE_PAGE_SIZE, CHAT_TITLE_MAX_LENGTH } from "@/lib/chat/config"
 import { ChatApiError, chatJsonError, getRequestId, normalizeCursor, normalizeLimit, parseJsonBody, readBoolean } from "@/lib/chat/http"
-import { createConversation, listConversationsForUser, type ChatDbClient } from "@/lib/chat/repository"
+import { createConversation, listConversationsForUser, listMessagesForConversation, type ChatDbClient } from "@/lib/chat/repository"
 
 function readTitle(value: unknown) {
   return typeof value === "string" ? value.trim() : ""
@@ -22,6 +22,7 @@ export async function GET(request: Request) {
     const status = searchParams.get("status")
     const query = searchParams.get("q")?.trim() || undefined
     const pinnedParam = searchParams.get("pinned")
+    const includeFirst = searchParams.get("includeFirst") === "true" && !cursor && !query
 
     if (status && status !== "active" && status !== "archived") {
       throw new ChatApiError(400, "VALIDATION_ERROR", "ค่า status ไม่ถูกต้อง", { requestId })
@@ -42,6 +43,14 @@ export async function GET(request: Request) {
       pinned: pinned ?? undefined,
       query,
     })
+    const firstConversation = includeFirst ? result.items[0] : null
+    const initialMessages = firstConversation
+      ? await listMessagesForConversation(chatDb, {
+          userId: user.id,
+          conversationId: firstConversation.id,
+          limit: CHAT_MESSAGE_PAGE_SIZE,
+        })
+      : null
 
     return NextResponse.json({
       items: result.items.map((item) => ({
@@ -53,6 +62,31 @@ export async function GET(request: Request) {
         preview: item.summary ?? "",
       })),
       nextCursor: result.nextCursor,
+      initialConversation: firstConversation && initialMessages
+        ? {
+            conversation: {
+              id: firstConversation.id,
+              title: firstConversation.title,
+              summary: firstConversation.summary,
+              pinned: firstConversation.pinned,
+              archivedAt: firstConversation.archivedAt?.toISOString() ?? null,
+              updatedAt: firstConversation.updatedAt.toISOString(),
+            },
+            messages: initialMessages.items.map((item) => ({
+              id: item.id,
+              role: item.role,
+              content: item.content,
+              status: item.status,
+              parentMessageId: item.parentMessageId,
+              clientRequestId: item.clientRequestId,
+              model: item.model,
+              finishReason: item.finishReason,
+              createdAt: item.createdAt.toISOString(),
+              updatedAt: item.updatedAt.toISOString(),
+            })),
+            nextCursor: initialMessages.nextCursor,
+          }
+        : null,
     })
   } catch (error) {
     return chatJsonError(error, requestId)
