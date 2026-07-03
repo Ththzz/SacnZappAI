@@ -1,4 +1,6 @@
 import type { Metadata } from "next";
+import { headers } from "next/headers";
+import { redirect } from "next/navigation";
 import "./globals.css";
 import LayoutClient from "./layout-client";
 import Header from "@/components/ui/Header/Header";
@@ -11,7 +13,17 @@ export const metadata: Metadata = {
 };
 
 export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+  const pathname = (await headers()).get("x-scanzapp-pathname") || "/";
   const user = await getCurrentUser();
+  const isPublicPage = pathname === "/sign-in" || pathname === "/sign-up";
+
+  if (user && isPublicPage) {
+    redirect("/");
+  }
+
+  if (!user && !isPublicPage) {
+    redirect(`/sign-in?next=${encodeURIComponent(pathname)}`);
+  }
 
   return (
     <html lang="th">
