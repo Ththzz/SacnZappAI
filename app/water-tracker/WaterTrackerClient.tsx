@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { Button } from '@/components/ui/button'
+import PageDataLoading from '@/components/ui/PageDataLoading'
 import { CheckCircle2, Droplet, Droplets, Minus, Plus, Target, Trash2, Waves } from 'lucide-react'
 import { getLocalDateKey, readWaterLogs, writeWaterLogs, type WaterLogEntry } from '@/lib/user-data'
 
@@ -42,6 +43,9 @@ export default function WaterTrackerClient() {
   useEffect(() => {
     const weekStart = new Date()
     weekStart.setDate(weekStart.getDate() - 6)
+    const stored = readWaterLogs()
+    if (stored.length > 0) setLogs(stored)
+
     fetch(`/api/water-logs?from=${getLocalDateKey(weekStart)}&to=${getLocalDateKey()}&limit=500`)
       .then(async (response) => {
         const data = (await response.json().catch(() => ({}))) as { logs?: WaterLogEntry[] }
@@ -160,6 +164,10 @@ export default function WaterTrackerClient() {
     }
   }
 
+  if (!loaded && logs.length === 0) {
+    return <PageDataLoading label="กำลังโหลดข้อมูลการดื่มน้ำ..." />
+  }
+
   return (
     <div className="mx-auto max-w-6xl space-y-5 text-neutral-900">
       <div className="flex justify-end">
@@ -236,9 +244,14 @@ export default function WaterTrackerClient() {
               <div>
                 <h2 className="text-sm font-bold">บันทึกวันนี้</h2>
                 <div className="mt-3 space-y-2">
-                  {todayLogs.length === 0 && (
+                  {loaded && todayLogs.length === 0 && (
                     <div className="rounded-xl bg-neutral-50 px-3 py-2 text-xs font-medium text-neutral-400">
                       ยังไม่มีรายการดื่มน้ำของวันนี้
+                    </div>
+                  )}
+                  {!loaded && todayLogs.length === 0 && (
+                    <div role="status" className="rounded-xl bg-blue-50 px-3 py-2 text-xs font-medium text-blue-500">
+                      กำลังอัปเดตรายการดื่มน้ำ...
                     </div>
                   )}
                   {todayLogs.map((entry, index) => (

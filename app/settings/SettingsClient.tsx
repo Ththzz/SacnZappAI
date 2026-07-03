@@ -19,6 +19,7 @@ import {
   ChartColumnIncreasing,
 } from "lucide-react"
 import { DEFAULT_SETTINGS, normalizeSettings, updateHealthGoal, type ActivityLevel, type AppSettings, type GoalMode } from "@/lib/settings"
+import PageDataLoading from "@/components/ui/PageDataLoading"
 
 const SETTINGS_STORAGE_KEY = "nutriscan.settings.v1"
 const STORAGE_KEYS_TO_CLEAR = [
@@ -193,7 +194,7 @@ export default function SettingsClient() {
   }
 
   if (!loaded) {
-    return <div className="mx-auto max-w-6xl text-sm text-neutral-500">กำลังโหลดการตั้งค่า...</div>
+    return <PageDataLoading label="กำลังโหลดการตั้งค่า..." />
   }
 
   if (view === "health-goal") {

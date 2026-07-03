@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react"
 import { BadgeCheck, Check, Target } from "lucide-react"
 import { STORAGE_KEYS } from "@/lib/user-data"
+import PageDataLoading from "@/components/ui/PageDataLoading"
 
 type GoalKey = "lean" | "maintain" | "cut"
 
@@ -62,6 +63,7 @@ export default function ProfileClient() {
   const [form, setForm] = useState<ProfileForm>(emptyForm)
   const [notice, setNotice] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  const [loaded, setLoaded] = useState(false)
   const savedProfile = useRef<StoredProfile>({ selectedGoal: "maintain", form: emptyForm })
 
   useEffect(() => {
@@ -73,6 +75,16 @@ export default function ProfileClient() {
       setSelectedGoal(nextGoal)
       setForm(nextForm)
       savedProfile.current = { selectedGoal: nextGoal, form: nextForm }
+    }
+
+    try {
+      const raw = window.localStorage.getItem(STORAGE_KEYS.profile)
+      if (raw) {
+        applyStoredProfile(JSON.parse(raw) as StoredProfile)
+        setLoaded(true)
+      }
+    } catch {
+      window.localStorage.removeItem(STORAGE_KEYS.profile)
     }
 
     fetch("/api/profile")
@@ -89,6 +101,7 @@ export default function ProfileClient() {
           window.localStorage.removeItem(STORAGE_KEYS.profile)
         }
       })
+      .finally(() => setLoaded(true))
   }, [])
 
   const handleFieldChange = (key: keyof ProfileForm, value: string) => {
@@ -137,6 +150,10 @@ export default function ProfileClient() {
     Number.isFinite(currentWeight) && Number.isFinite(targetWeight)
       ? Math.abs(currentWeight - targetWeight)
       : 0
+
+  if (!loaded) {
+    return <PageDataLoading label="กำลังโหลดข้อมูลโปรไฟล์..." />
+  }
 
   return (
     <div className="mx-auto max-w-[1180px] text-[#202421]">

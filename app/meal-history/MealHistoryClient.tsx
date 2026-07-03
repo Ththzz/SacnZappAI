@@ -30,6 +30,7 @@ import {
   resolveMealCategory,
   type MealCategory,
 } from "@/lib/user-data"
+import PageDataLoading from "@/components/ui/PageDataLoading"
 
 type ViewMode = "day" | "week" | "month"
 type DayMeal = {
@@ -196,6 +197,7 @@ export default function MealHistoryClient() {
   const [addingMeal, setAddingMeal] = useState(false)
   const [targets, setTargets] = useState<NutritionTargets | null>(initialCache?.targets ?? null)
   const [historyError, setHistoryError] = useState<string | null>(null)
+  const [historyLoaded, setHistoryLoaded] = useState(Boolean(initialCache))
   const todayKey = getLocalDateKey()
 
   const loadHistoryData = useCallback(async () => {
@@ -234,13 +236,14 @@ export default function MealHistoryClient() {
       }),
     ])
 
-    const loadedMeals = mealResult.status === "fulfilled" ? mealResult.value : []
-    const nextHistoryMeals = convertMeals(loadedMeals)
-    const nextTargets = settingsResult.status === "fulfilled" ? deriveTargets(settingsResult.value) : null
-    setHistoryMeals(nextHistoryMeals)
-    setTargets(nextTargets)
+    if (mealResult.status === "fulfilled") {
+      setHistoryMeals(convertMeals(mealResult.value))
+    }
+    if (settingsResult.status === "fulfilled") {
+      setTargets(deriveTargets(settingsResult.value))
+    }
     setHistoryError(mealResult.status === "fulfilled" ? null : "โหลดมื้ออาหารจากเซิร์ฟเวอร์ไม่สำเร็จ กรุณาลองรีเฟรชอีกครั้ง")
-    writeHistoryCache({ historyMeals: nextHistoryMeals, targets: nextTargets })
+    setHistoryLoaded(true)
   }, [])
 
   useEffect(() => {
@@ -276,8 +279,9 @@ export default function MealHistoryClient() {
   }, [loadHistoryData])
 
   useEffect(() => {
+    if (!historyLoaded) return
     writeHistoryCache({ historyMeals, targets })
-  }, [historyMeals, targets])
+  }, [historyLoaded, historyMeals, targets])
 
   const todayMeals = historyMeals.filter((meal) => meal.date === todayKey)
   const dailyCalories = todayMeals.reduce((total, meal) => total + meal.calories, 0)
@@ -381,6 +385,10 @@ export default function MealHistoryClient() {
       setHistoryMeals(previousMeals)
       setHistoryError(error instanceof Error ? error.message : "บันทึกมื้ออาหารไม่สำเร็จ")
     }
+  }
+
+  if (!historyLoaded) {
+    return <PageDataLoading label="กำลังโหลดประวัติมื้ออาหาร..." />
   }
 
   return (

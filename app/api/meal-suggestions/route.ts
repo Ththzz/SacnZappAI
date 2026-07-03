@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto"
-import { NextResponse } from "next/server"
+import { after, NextResponse } from "next/server"
 
-import { AiProviderError, defaultAiModel, requestAiChat } from "@/lib/ai/provider"
+import { defaultAiModel, requestAiChat } from "@/lib/ai/provider"
 import { requireUser } from "@/lib/auth"
 import { prisma } from "@/lib/db"
 import { jsonError } from "@/lib/http"
@@ -28,9 +28,9 @@ export const maxDuration = 60
 const bangkokTimeZone = "Asia/Bangkok"
 const dayMs = 24 * 60 * 60 * 1000
 const globalSuggestionJobs = globalThis as typeof globalThis & {
-  mealSuggestionJobs?: Map<string, Promise<MealSuggestion[]>>
+  mealSuggestionJobs?: Map<string, Promise<void>>
 }
-const suggestionJobs = globalSuggestionJobs.mealSuggestionJobs ?? new Map<string, Promise<MealSuggestion[]>>()
+const suggestionJobs = globalSuggestionJobs.mealSuggestionJobs ?? new Map<string, Promise<void>>()
 globalSuggestionJobs.mealSuggestionJobs = suggestionJobs
 
 function extractJson(content: string) {
@@ -91,6 +91,18 @@ function parseCachedSuggestions(raw: string | undefined) {
     return normalizeSuggestions(JSON.parse(raw))
   } catch {
     return []
+  }
+}
+
+function readDailyCalories(settingsJson: string | undefined) {
+  try {
+    const settings = settingsJson
+      ? JSON.parse(settingsJson) as { healthGoal?: { dailyCalories?: number } }
+      : null
+    const value = Number(settings?.healthGoal?.dailyCalories)
+    return Number.isFinite(value) && value > 0 ? Math.round(value) : null
+  } catch {
+    return null
   }
 }
 
@@ -166,20 +178,13 @@ function buildFallbackSuggestions(input: {
     .slice(0, 3)
 }
 
-async function createSuggestions(userId: string, meals: Awaited<ReturnType<typeof loadRecentMeals>>) {
+async function createSuggestions(
+  meals: Awaited<ReturnType<typeof loadRecentMeals>>,
+  dailyCalories: number | null,
+) {
   const apiKey = process.env.QWEN_API_KEY
   const model = process.env.QWEN_MODEL?.trim() || defaultAiModel
   if (!apiKey) throw new Error("QWEN_API_KEY_MISSING")
-
-  const settingsRow = await prisma.userSettings.findUnique({ where: { userId } })
-  let dailyCalories: number | null = null
-  try {
-    const settings = settingsRow?.settingsJson ? JSON.parse(settingsRow.settingsJson) as { healthGoal?: { dailyCalories?: number } } : null
-    const value = Number(settings?.healthGoal?.dailyCalories)
-    dailyCalories = Number.isFinite(value) && value > 0 ? Math.round(value) : null
-  } catch {
-    dailyCalories = null
-  }
 
   const totals = summarizeTotals(meals)
   const mealSummary = meals
@@ -212,15 +217,50 @@ async function createSuggestions(userId: string, meals: Awaited<ReturnType<typeo
   return suggestions
 }
 
-async function createSuggestionsOnce(userId: string, meals: Awaited<ReturnType<typeof loadRecentMeals>>) {
+async function createAndCacheSuggestionsOnce(
+  userId: string,
+  meals: Awaited<ReturnType<typeof loadRecentMeals>>,
+  dailyCalories: number | null,
+) {
   const running = suggestionJobs.get(userId)
   if (running) return running
 
-  const job = createSuggestions(userId, meals).finally(() => {
+  const job = (async () => {
+    const suggestions = await createSuggestions(meals, dailyCalories)
+    const generatedAt = new Date()
+    await prisma.mealSuggestionCache.upsert({
+      where: { userId },
+      create: {
+        userId,
+        suggestionsJson: JSON.stringify(suggestions),
+        generatedAt,
+      },
+      update: {
+        suggestionsJson: JSON.stringify(suggestions),
+        generatedAt,
+      },
+    })
+  })().finally(() => {
     if (suggestionJobs.get(userId) === job) suggestionJobs.delete(userId)
   })
   suggestionJobs.set(userId, job)
   return job
+}
+
+function refreshSuggestionsInBackground(
+  userId: string,
+  meals: Awaited<ReturnType<typeof loadRecentMeals>>,
+  dailyCalories: number | null,
+) {
+  if (suggestionJobs.has(userId)) return
+
+  after(async () => {
+    try {
+      await createAndCacheSuggestionsOnce(userId, meals, dailyCalories)
+    } catch (error) {
+      console.error("Background meal suggestion refresh failed", error)
+    }
+  })
 }
 
 async function loadRecentMeals(userId: string) {
@@ -234,9 +274,10 @@ async function loadRecentMeals(userId: string) {
 async function handleSuggestions(forceRefresh: boolean) {
   try {
     const user = await requireUser()
-    const [meals, cache] = await Promise.all([
+    const [meals, cache, settingsRow] = await Promise.all([
       loadRecentMeals(user.id),
       prisma.mealSuggestionCache.findUnique({ where: { userId: user.id } }),
+      prisma.userSettings.findUnique({ where: { userId: user.id }, select: { settingsJson: true } }),
     ])
 
     if (meals.length === 0) {
@@ -249,69 +290,35 @@ async function handleSuggestions(forceRefresh: boolean) {
     }
 
     const cachedSuggestions = parseCachedSuggestions(cache?.suggestionsJson)
-    if (!forceRefresh && cache && cachedSuggestions.length > 0) {
-      const isFresh = isSameBangkokDay(cache.generatedAt, new Date())
+    const cacheIsFresh = Boolean(cache && isSameBangkokDay(cache.generatedAt, new Date()))
+    if (!forceRefresh && cache && cachedSuggestions.length > 0 && cacheIsFresh) {
       return NextResponse.json({
         suggestions: cachedSuggestions,
-        source: isFresh ? "cache" : "cache-stale",
+        source: "cache",
         generatedAt: cache.generatedAt.toISOString(),
-        isStale: !isFresh,
+        isStale: false,
+        refreshing: suggestionJobs.has(user.id),
       })
     }
 
-    try {
-      const suggestions = await createSuggestionsOnce(user.id, meals)
-      const generatedAt = new Date()
-      await prisma.mealSuggestionCache.upsert({
-        where: { userId: user.id },
-        create: {
-          userId: user.id,
-          suggestionsJson: JSON.stringify(suggestions),
-          generatedAt,
-        },
-        update: {
-          suggestionsJson: JSON.stringify(suggestions),
-          generatedAt,
-        },
-      })
-      return NextResponse.json({
-        suggestions,
-        source: "ai",
-        generatedAt: generatedAt.toISOString(),
-        isStale: false,
-      })
-    } catch (error) {
-      if (cachedSuggestions.length > 0 && cache) {
-        return NextResponse.json({
-          suggestions: cachedSuggestions,
-          source: "cache-stale",
-          generatedAt: cache.generatedAt.toISOString(),
-          isStale: true,
-          error: error instanceof Error ? error.message : "สร้างคำแนะนำใหม่ไม่สำเร็จ",
-        })
-      }
+    const dailyCalories = readDailyCalories(settingsRow?.settingsJson)
+    const hasAiConfiguration = Boolean(process.env.QWEN_API_KEY)
+    const suggestions = cachedSuggestions.length > 0
+      ? cachedSuggestions
+      : buildFallbackSuggestions({ meals, dailyCalories })
 
-      const missingKey = error instanceof Error && error.message === "QWEN_API_KEY_MISSING"
-      if (!missingKey) {
-        const fallbackSuggestions = buildFallbackSuggestions({ meals, dailyCalories: null })
-        return NextResponse.json({
-          suggestions: fallbackSuggestions,
-          source: "fallback",
-          generatedAt: null,
-          isStale: false,
-          error: error instanceof Error ? error.message : "สร้างคำแนะนำไม่สำเร็จ",
-        })
-      }
-
-      const message = error instanceof AiProviderError ? error.message : missingKey ? "ยังไม่ได้ตั้งค่า QWEN_API_KEY" : "สร้างคำแนะนำไม่สำเร็จ"
-      return NextResponse.json({
-        suggestions: [],
-        source: missingKey ? "missing-api-key" : "ai-error",
-        generatedAt: null,
-        isStale: false,
-        error: message,
-      })
+    if (hasAiConfiguration) {
+      refreshSuggestionsInBackground(user.id, meals, dailyCalories)
     }
+
+    return NextResponse.json({
+      suggestions,
+      source: cachedSuggestions.length > 0 ? (cacheIsFresh ? "cache" : "cache-stale") : "fallback",
+      generatedAt: cache?.generatedAt.toISOString() ?? null,
+      isStale: cachedSuggestions.length > 0 && !cacheIsFresh,
+      refreshing: hasAiConfiguration,
+      error: hasAiConfiguration ? undefined : "ยังไม่ได้ตั้งค่า QWEN_API_KEY",
+    }, { status: hasAiConfiguration ? 202 : 200 })
   } catch (error) {
     return jsonError(error)
   }

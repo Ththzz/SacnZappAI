@@ -69,6 +69,7 @@ type SuggestionPayload = {
   source?: string
   generatedAt?: string | null
   isStale?: boolean
+  refreshing?: boolean
   error?: string
 }
 
@@ -162,6 +163,21 @@ export default function HealthInsightClient() {
   const [convertingMeal, setConvertingMeal] = useState<SavedMealSuggestion | null>(null)
   const initialLoadStarted = useRef(false)
 
+  const applySuggestionPayload = useCallback((payload: SuggestionPayload) => {
+    setMealSuggestions(payload.suggestions ?? [])
+    setSuggestionSource(payload.source ?? "")
+    setSuggestionGeneratedAt(payload.generatedAt ?? null)
+    setSuggestionStale(Boolean(payload.isStale))
+    setSuggestionError(payload.error ?? null)
+    writeSessionCache<SuggestionCachePayload>(SUGGESTION_CACHE_KEY, {
+      mealSuggestions: payload.suggestions ?? [],
+      suggestionSource: payload.source ?? "",
+      suggestionGeneratedAt: payload.generatedAt ?? null,
+      suggestionStale: Boolean(payload.isStale),
+      suggestionError: payload.error ?? null,
+    })
+  }, [])
+
   const loadSuggestionData = useCallback(async (force = false) => {
     if (force) setRefreshing(true)
     else setSuggestionLoading(true)
@@ -172,25 +188,34 @@ export default function HealthInsightClient() {
       const payload = (await response.json().catch(() => ({}))) as SuggestionPayload
       if (!response.ok) throw new Error(parseApiError(payload, "โหลดคำแนะนำไม่สำเร็จ"))
 
-      setMealSuggestions(payload.suggestions ?? [])
-      setSuggestionSource(payload.source ?? "")
-      setSuggestionGeneratedAt(payload.generatedAt ?? null)
-      setSuggestionStale(Boolean(payload.isStale))
-      setSuggestionError(payload.error ?? null)
-      writeSessionCache<SuggestionCachePayload>(SUGGESTION_CACHE_KEY, {
-        mealSuggestions: payload.suggestions ?? [],
-        suggestionSource: payload.source ?? "",
-        suggestionGeneratedAt: payload.generatedAt ?? null,
-        suggestionStale: Boolean(payload.isStale),
-        suggestionError: payload.error ?? null,
-      })
+      applySuggestionPayload(payload)
+      setSuggestionLoading(false)
+
+      if (payload.refreshing) {
+        setRefreshing(true)
+        const previousGeneratedAt = payload.generatedAt ?? null
+
+        for (let attempt = 0; attempt < 10; attempt += 1) {
+          await new Promise((resolve) => window.setTimeout(resolve, 1_500))
+          const pollResponse = await fetch("/api/meal-suggestions")
+          const pollPayload = (await pollResponse.json().catch(() => ({}))) as SuggestionPayload
+          if (!pollResponse.ok) continue
+
+          applySuggestionPayload(pollPayload)
+          const hasNewResult =
+            !pollPayload.refreshing &&
+            !pollPayload.isStale &&
+            (pollPayload.generatedAt ?? null) !== previousGeneratedAt
+          if (hasNewResult) break
+        }
+      }
     } catch (error) {
       setSuggestionError(error instanceof Error ? error.message : "โหลดคำแนะนำไม่สำเร็จ")
     } finally {
       setSuggestionLoading(false)
       setRefreshing(false)
     }
-  }, [])
+  }, [applySuggestionPayload])
 
   const loadInsightData = useCallback(async () => {
     setLoading(true)
@@ -566,10 +591,16 @@ function MealSuggestionsCard({
         {macroBalance.map((macro) => <span key={macro.label}>{macro.label} {macro.value}</span>)}
       </div>
 
-      {(isStale || error) && (
-        <div className={`mt-4 flex items-start gap-2 rounded-xl px-4 py-3 text-xs font-semibold ${isStale ? "bg-amber-50 text-amber-700" : "bg-rose-50 text-rose-700"}`}>
+      {(refreshing || isStale || error) && (
+        <div className={`mt-4 flex items-start gap-2 rounded-xl px-4 py-3 text-xs font-semibold ${refreshing || isStale ? "bg-amber-50 text-amber-700" : "bg-rose-50 text-rose-700"}`}>
           <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-          <span>{isStale ? "กำลังแสดงคำแนะนำที่บันทึกไว้ก่อนหน้า กดสร้างคำแนะนำใหม่เมื่อต้องการอัปเดต" : error}</span>
+          <span>
+            {refreshing
+              ? "กำลังสร้างคำแนะนำด้วย AI เบื้องหลัง คุณยังใช้งานหน้าอื่นต่อได้"
+              : isStale
+                ? "กำลังแสดงคำแนะนำที่บันทึกไว้ก่อนหน้า กดสร้างคำแนะนำใหม่เมื่อต้องการอัปเดต"
+                : error}
+          </span>
         </div>
       )}
 
