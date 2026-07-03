@@ -2,7 +2,6 @@
 
 import { useState } from "react"
 import { LogOut } from "lucide-react"
-import { useRouter } from "next/navigation"
 
 export type AdminUser = {
   id: string
@@ -13,14 +12,12 @@ export type AdminUser = {
 }
 
 export function AdminSignOutButton() {
-  const router = useRouter()
   const [signingOut, setSigningOut] = useState(false)
 
   const signOut = async () => {
     setSigningOut(true)
     await fetch("/api/auth/sign-out", { method: "POST" }).catch(() => undefined)
-    router.replace("/sign-in")
-    router.refresh()
+    window.location.replace("/sign-in")
   }
 
   return (

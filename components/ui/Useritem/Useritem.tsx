@@ -1,7 +1,6 @@
 "use client"
 
 import { useState } from "react"
-import { useRouter } from "next/navigation"
 import { ChevronDown, LogOut, ShieldCheck, UserRound } from "lucide-react"
 import {
   Dialog,
@@ -37,7 +36,6 @@ function getInitials(name: string) {
 }
 
 const Useritem = ({ isSidebarOpen, initialUser }: { isSidebarOpen: boolean; initialUser?: UserSummary | null }) => {
-  const router = useRouter()
   const user = initialUser ?? { name: "ผู้ใช้", email: "" }
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [signingOut, setSigningOut] = useState(false)
@@ -45,10 +43,8 @@ const Useritem = ({ isSidebarOpen, initialUser }: { isSidebarOpen: boolean; init
   const handleSignOut = async () => {
     setSigningOut(true)
     await fetch("/api/auth/sign-out", { method: "POST" }).catch(() => undefined)
-    setSigningOut(false)
     setConfirmOpen(false)
-    router.replace("/sign-in")
-    router.refresh()
+    window.location.replace("/sign-in")
   }
 
   return (

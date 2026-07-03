@@ -1,7 +1,6 @@
 "use client"
 
 import Link from "next/link"
-import { useRouter } from "next/navigation"
 import { useEffect, useMemo, useRef, useState } from "react"
 import {
   Bell,
@@ -31,7 +30,6 @@ const STORAGE_KEYS_TO_CLEAR = [
 ]
 
 export default function SettingsClient() {
-  const router = useRouter()
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS)
   const [loaded, setLoaded] = useState(false)
   const [view, setView] = useState<"main" | "health-goal">("main")
@@ -112,8 +110,7 @@ export default function SettingsClient() {
 
   const signOut = async () => {
     await fetch("/api/auth/sign-out", { method: "POST" }).catch(() => undefined)
-    router.replace("/sign-in")
-    router.refresh()
+    window.location.replace("/sign-in")
   }
 
   const recommendation = useMemo(() => {
