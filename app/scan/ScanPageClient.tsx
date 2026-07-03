@@ -18,7 +18,6 @@ import {
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
-  addMealEntry,
   getLocalDateKey,
   getTimeBasedMealCategory,
   MEAL_CATEGORY_LABELS,
@@ -132,6 +131,7 @@ export default function ScanPageClient() {
   const [preview, setPreview] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [saved, setSaved] = useState(false)
+  const [savePending, setSavePending] = useState(false)
   const [detailsOpen, setDetailsOpen] = useState(false)
 
   const hasResult = Boolean(result)
@@ -314,7 +314,7 @@ export default function ScanPageClient() {
   }
 
   const saveScanResult = async () => {
-    if (!result || saved) return
+    if (!result || saved || savePending) return
     const now = new Date()
     const entry = {
       id: `scan-${now.getTime()}`,
@@ -333,14 +333,27 @@ export default function ScanPageClient() {
       source: 'scan',
     } as const
 
-    const response = await fetch('/api/meals', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(entry),
-    }).catch(() => null)
+    setSavePending(true)
+    setError(null)
 
-    if (!response?.ok) addMealEntry(entry)
-    setSaved(true)
+    try {
+      const response = await fetch('/api/meals', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(entry),
+      })
+
+      const payload = (await response.json().catch(() => null)) as { error?: string } | null
+      if (!response.ok) {
+        throw new Error(payload?.error || 'บันทึกมื้ออาหารไม่สำเร็จ')
+      }
+
+      setSaved(true)
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : 'บันทึกมื้ออาหารไม่สำเร็จ')
+    } finally {
+      setSavePending(false)
+    }
   }
 
   return (
@@ -536,9 +549,9 @@ export default function ScanPageClient() {
               </div>
 
               <div className="mt-5 grid gap-3 sm:grid-cols-2">
-                <Button className="h-12 rounded-xl bg-emerald-600 font-bold text-white shadow-md shadow-emerald-600/15 hover:bg-emerald-700" onClick={saveScanResult} disabled={saved}>
+                <Button className="h-12 rounded-xl bg-emerald-600 font-bold text-white shadow-md shadow-emerald-600/15 hover:bg-emerald-700" onClick={saveScanResult} disabled={saved || savePending}>
                   <SaveIcon className="size-4" />
-                  {saved ? 'บันทึกแล้ว' : 'บันทึกข้อมูล'}
+                  {saved ? 'บันทึกแล้ว' : savePending ? 'กำลังบันทึก...' : 'บันทึกข้อมูล'}
                 </Button>
                 <Button
                   variant="outline"

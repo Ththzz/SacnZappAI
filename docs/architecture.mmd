@@ -1,0 +1,26 @@
+flowchart LR
+  U["Users<br/>💻 Web / 📱 Mobile / 🛡️ Admin"]
+
+  subgraph P["ScanZapp AI Platform (Vercel)"]
+    direction TB
+    F["Frontend<br/>Dashboard / Scan / Chat / Profile / Admin"]
+    B["Backend APIs<br/>Auth / Profile / Tracking / Chat / Scan / Admin / Health"]
+    C["Core Services<br/>Session Guard / Context Builder / Rate Limit / Prisma ORM"]
+  end
+
+  D["Database<br/>🗄️ Supabase PostgreSQL"]
+  A["AI Service<br/>✨ Qwen-compatible API"]
+
+  U --> F
+  F --> B
+  B --> C
+  C --> D
+  C --> A
+
+  style U fill:#dbeafe,stroke:#3b82f6,stroke-width:2px,color:#1e3a8a
+  style P fill:#f8fafc,stroke:#2563eb,stroke-width:3px,color:#0f172a
+  style F fill:#dcfce7,stroke:#22c55e,stroke-width:2px,color:#14532d
+  style B fill:#fef3c7,stroke:#f59e0b,stroke-width:2px,color:#78350f
+  style C fill:#ede9fe,stroke:#8b5cf6,stroke-width:2px,color:#4c1d95
+  style D fill:#fee2e2,stroke:#ef4444,stroke-width:2px,color:#7f1d1d
+  style A fill:#e0f2fe,stroke:#06b6d4,stroke-width:2px,color:#164e63

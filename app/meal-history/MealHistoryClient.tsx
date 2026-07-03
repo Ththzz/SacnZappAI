@@ -162,6 +162,7 @@ export default function MealHistoryClient() {
   const [historyMeals, setHistoryMeals] = useState<DayMeal[]>([])
   const [addingMeal, setAddingMeal] = useState(false)
   const [targets, setTargets] = useState<NutritionTargets | null>(null)
+  const [historyError, setHistoryError] = useState<string | null>(null)
   const todayKey = getLocalDateKey()
 
   useEffect(() => {
@@ -199,9 +200,10 @@ export default function MealHistoryClient() {
         return data
       }),
     ]).then(([mealResult, settingsResult]) => {
-      const loadedMeals = mealResult.status === "fulfilled" ? mealResult.value : readMealEntries()
+      const loadedMeals = mealResult.status === "fulfilled" ? mealResult.value : []
       setHistoryMeals(convertMeals(loadedMeals))
       setTargets(settingsResult.status === "fulfilled" ? deriveTargets(settingsResult.value) : null)
+      setHistoryError(mealResult.status === "fulfilled" ? null : "โหลดมื้ออาหารจากเซิร์ฟเวอร์ไม่สำเร็จ กรุณาลองรีเฟรชอีกครั้ง")
     })
   }, [])
 
@@ -214,58 +216,106 @@ export default function MealHistoryClient() {
   const averageCalories = daysWithMeals > 0 ? Math.round(weeklyCalories / daysWithMeals) : 0
 
   const handleDeleteMeal = async (mealId: string) => {
+    const previousMeals = historyMeals
     setHistoryMeals((current) => current.filter((meal) => meal.id !== mealId))
     if (selectedMeal?.id === mealId) setSelectedMeal(null)
-    await fetch(`/api/meals/${mealId}`, { method: "DELETE" }).catch(() => undefined)
+    setHistoryError(null)
+
+    try {
+      const response = await fetch(`/api/meals/${mealId}`, { method: "DELETE" })
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as { error?: string } | null
+        throw new Error(payload?.error || "ลบมื้ออาหารไม่สำเร็จ")
+      }
+    } catch (error) {
+      setHistoryMeals(previousMeals)
+      if (selectedMeal?.id === mealId) {
+        const restored = previousMeals.find((meal) => meal.id === mealId) ?? null
+        setSelectedMeal(restored)
+      }
+      setHistoryError(error instanceof Error ? error.message : "ลบมื้ออาหารไม่สำเร็จ")
+    }
   }
 
   const handleUpdateMeal = async (updatedMeal: DayMeal) => {
+    const previousMeals = historyMeals
+    const previousSelectedMeal = selectedMeal
     setHistoryMeals((current) => current.map((meal) => (meal.id === updatedMeal.id ? updatedMeal : meal)))
     setSelectedMeal(updatedMeal)
-    await fetch(`/api/meals/${updatedMeal.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name: updatedMeal.name,
-        calories: updatedMeal.calories,
-        protein: updatedMeal.protein ?? 0,
-        carbs: updatedMeal.carbs ?? 0,
-        fat: updatedMeal.fat ?? 0,
-        time: updatedMeal.time,
-        date: updatedMeal.date,
-        source: updatedMeal.source ?? "scan",
-        confidence: updatedMeal.confidence,
-        note: updatedMeal.note,
-        mealCategory: updatedMeal.mealCategory,
-      }),
-    }).catch(() => undefined)
+    setHistoryError(null)
+
+    try {
+      const response = await fetch(`/api/meals/${updatedMeal.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: updatedMeal.name,
+          calories: updatedMeal.calories,
+          protein: updatedMeal.protein ?? 0,
+          carbs: updatedMeal.carbs ?? 0,
+          fat: updatedMeal.fat ?? 0,
+          time: updatedMeal.time,
+          date: updatedMeal.date,
+          source: updatedMeal.source ?? "scan",
+          confidence: updatedMeal.confidence,
+          note: updatedMeal.note,
+          mealCategory: updatedMeal.mealCategory,
+        }),
+      })
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as { error?: string } | null
+        throw new Error(payload?.error || "อัปเดตมื้ออาหารไม่สำเร็จ")
+      }
+    } catch (error) {
+      setHistoryMeals(previousMeals)
+      setSelectedMeal(previousSelectedMeal)
+      setHistoryError(error instanceof Error ? error.message : "อัปเดตมื้ออาหารไม่สำเร็จ")
+    }
   }
 
   const handleAddManualMeal = async (meal: DayMeal) => {
+    const previousMeals = historyMeals
     setHistoryMeals((current) => [meal, ...current])
-    setAddingMeal(false)
-    await fetch("/api/meals", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        id: meal.id,
-        name: meal.name,
-        calories: meal.calories,
-        protein: meal.protein ?? 0,
-        carbs: meal.carbs ?? 0,
-        fat: meal.fat ?? 0,
-        time: meal.time,
-        date: meal.date,
-        source: "manual",
-        confidence: meal.confidence,
-        note: meal.note,
-        mealCategory: meal.mealCategory,
-      }),
-    }).catch(() => undefined)
+    setHistoryError(null)
+
+    try {
+      const response = await fetch("/api/meals", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: meal.id,
+          name: meal.name,
+          calories: meal.calories,
+          protein: meal.protein ?? 0,
+          carbs: meal.carbs ?? 0,
+          fat: meal.fat ?? 0,
+          time: meal.time,
+          date: meal.date,
+          source: "manual",
+          confidence: meal.confidence,
+          note: meal.note,
+          mealCategory: meal.mealCategory,
+        }),
+      })
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as { error?: string } | null
+        throw new Error(payload?.error || "บันทึกมื้ออาหารไม่สำเร็จ")
+      }
+      setAddingMeal(false)
+    } catch (error) {
+      setHistoryMeals(previousMeals)
+      setHistoryError(error instanceof Error ? error.message : "บันทึกมื้ออาหารไม่สำเร็จ")
+    }
   }
 
   return (
     <div className="mx-auto max-w-7xl space-y-5 text-neutral-900">
+      {historyError && (
+        <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
+          {historyError}
+        </div>
+      )}
+
       <div className="flex flex-wrap items-center justify-between gap-3">
         <ViewTabs activeView={activeView} onChange={setActiveView} />
         <button
@@ -773,7 +823,7 @@ function MealDetailModal({
   )
 }
 
-function ManualMealModal({ onClose, onAdd }: { onClose: () => void; onAdd: (meal: DayMeal) => void }) {
+function ManualMealModal({ onClose, onAdd }: { onClose: () => void; onAdd: (meal: DayMeal) => Promise<void> }) {
   const now = new Date()
   const [form, setForm] = useState({
     name: "",
@@ -793,11 +843,11 @@ function ManualMealModal({ onClose, onAdd }: { onClose: () => void; onAdd: (meal
     setForm((current) => ({ ...current, [key]: value }))
   }
 
-  const submit = () => {
+  const submit = async () => {
     const name = form.name.trim()
     if (!name) return
 
-    onAdd({
+    await onAdd({
       id: `manual-${Date.now()}`,
       icon: "🍽️",
       name,
@@ -845,7 +895,7 @@ function ManualMealModal({ onClose, onAdd }: { onClose: () => void; onAdd: (meal
             />
           </label>
           <div className="flex flex-wrap gap-2 sm:col-span-2">
-            <button type="button" onClick={submit} className="inline-flex h-10 items-center justify-center gap-2 rounded-full bg-emerald-600 px-4 text-sm font-bold text-white hover:bg-emerald-700">
+            <button type="button" onClick={() => void submit()} className="inline-flex h-10 items-center justify-center gap-2 rounded-full bg-emerald-600 px-4 text-sm font-bold text-white hover:bg-emerald-700">
               <Save className="h-4 w-4" />
               บันทึกมื้ออาหาร
             </button>
