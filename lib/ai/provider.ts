@@ -138,6 +138,7 @@ export async function requestAiChat(input: {
   timeoutMs?: number
   signal?: AbortSignal
   maxTokens?: number
+  enableThinking?: boolean
   onDelta?: (text: string) => void
 }) {
   const model = input.model?.trim() || process.env.QWEN_MODEL?.trim() || defaultAiModel
@@ -188,6 +189,7 @@ export async function requestAiChat(input: {
           stream: Boolean(input.onDelta),
           messages: input.messages,
           max_tokens: input.maxTokens,
+          ...(input.enableThinking === undefined ? {} : { enable_thinking: input.enableThinking }),
         }),
         signal: controller.signal,
       })

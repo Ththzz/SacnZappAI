@@ -1,6 +1,6 @@
 import { requireUser } from "@/lib/auth"
 import { prisma } from "@/lib/db"
-import { requestChatCompletion, buildChatMessagesWithContext, buildChatTitle, ChatProviderError } from "@/lib/chat/ai"
+import { requestChatCompletion, buildChatMessagesWithContext, buildChatTitle, ChatProviderError, defaultChatAiModel } from "@/lib/chat/ai"
 import { CHAT_MESSAGE_MAX_LENGTH, CHAT_POLICY_VERSION } from "@/lib/chat/config"
 import { ChatApiError, chatError, chatJsonError, getRequestId, parseJsonBody } from "@/lib/chat/http"
 import { buildChatContext } from "@/lib/chat/context"
@@ -322,14 +322,14 @@ export async function POST(request: Request) {
               updateMessage(chatDb, user.id, assistantMessage.id, {
                 status: wasStopped ? "stopped" : "error",
                 finishReason: wasStopped ? "stop" : "error",
-                model: process.env.QWEN_MODEL?.trim() || undefined,
+                model: process.env.CHAT_AI_MODEL?.trim() || defaultChatAiModel,
               }),
               createChatUsage(chatDb, {
                 userId: user.id,
                 conversationId: activeConversationId,
                 messageId: assistantMessage.id,
                 requestId: clientRequestId,
-                model: process.env.QWEN_MODEL?.trim() || "qwen/qwen3.7-plus",
+                model: process.env.CHAT_AI_MODEL?.trim() || defaultChatAiModel,
                 outcome: wasStopped
                   ? "stopped"
                   : error instanceof ChatProviderError && error.status === 504

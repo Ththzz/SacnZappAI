@@ -26,7 +26,9 @@ DATABASE_URL="postgresql://postgres.dhhqdvnrhybcyegvhnik:PASSWORD@aws-1-ap-south
 DIRECT_URL="postgresql://postgres.dhhqdvnrhybcyegvhnik:PASSWORD@aws-1-ap-southeast-2.pooler.supabase.com:5432/postgres"
 QWEN_API_KEY="..."
 QWEN_MODEL="qwen/qwen3.7-plus"
-NEXT_PUBLIC_AI_MODEL="qwen/qwen3.7-plus"
+CHAT_AI_MODEL="openai/gpt-4o-mini"
+MEAL_SUGGESTION_MODEL="qwen/qwen3.6-flash"
+NEXT_PUBLIC_AI_MODEL="openai/gpt-4o-mini"
 ```
 
 Use the exact URLs supplied by Supabase and URL-encode special characters in the password.
@@ -66,6 +68,8 @@ Import the Git repository as a Next.js project. Add these variables to both Prev
 - `DIRECT_URL`
 - `QWEN_API_KEY`
 - `QWEN_MODEL`
+- `CHAT_AI_MODEL`
+- `MEAL_SUGGESTION_MODEL`
 - `NEXT_PUBLIC_AI_MODEL`
 - `AI_BASE_URL` if using a non-default AI endpoint
 

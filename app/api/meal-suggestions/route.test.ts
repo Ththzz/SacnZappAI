@@ -63,6 +63,7 @@ describe("meal suggestions cache", () => {
     vi.clearAllMocks()
     afterTasks.length = 0
     process.env.QWEN_API_KEY = "test-key"
+    delete process.env.MEAL_SUGGESTION_MODEL
     requireUser.mockResolvedValue({ id: "user-1" })
     findMeals.mockResolvedValue(meals)
     findSettings.mockResolvedValue({ settingsJson: JSON.stringify({ healthGoal: { dailyCalories: 1800 } }) })
@@ -135,8 +136,10 @@ describe("meal suggestions cache", () => {
 
     expect(requestAiChat).toHaveBeenCalledTimes(1)
     expect(requestAiChat).toHaveBeenCalledWith(expect.objectContaining({
+      model: "qwen/qwen3.6-flash",
       timeoutMs: 12_000,
       maxTokens: 320,
+      enableThinking: false,
     }))
     expect(upsertCache).toHaveBeenCalledTimes(1)
   })

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto"
 import { after, NextResponse } from "next/server"
 
-import { defaultAiModel, requestAiChat } from "@/lib/ai/provider"
+import { requestAiChat } from "@/lib/ai/provider"
 import { requireUser } from "@/lib/auth"
 import { prisma } from "@/lib/db"
 import { jsonError } from "@/lib/http"
@@ -24,6 +24,7 @@ type MealMacroTotals = {
 }
 
 export const maxDuration = 60
+const defaultMealSuggestionModel = "qwen/qwen3.6-flash"
 
 const bangkokTimeZone = "Asia/Bangkok"
 const dayMs = 24 * 60 * 60 * 1000
@@ -183,7 +184,9 @@ async function createSuggestions(
   dailyCalories: number | null,
 ) {
   const apiKey = process.env.QWEN_API_KEY
-  const model = process.env.QWEN_MODEL?.trim() || defaultAiModel
+  const model =
+    process.env.MEAL_SUGGESTION_MODEL?.trim() ||
+    defaultMealSuggestionModel
   if (!apiKey) throw new Error("QWEN_API_KEY_MISSING")
 
   const totals = summarizeTotals(meals)
@@ -196,6 +199,7 @@ async function createSuggestions(
     model,
     timeoutMs: 12_000,
     maxTokens: 320,
+    enableThinking: false,
     messages: [
       {
         role: "system",

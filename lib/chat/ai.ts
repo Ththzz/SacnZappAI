@@ -1,5 +1,7 @@
 import { CHAT_SYSTEM_PROMPT_VERSION } from "@/lib/chat/config"
-import { defaultAiModel, requestAiChat, AiProviderError } from "@/lib/ai/provider"
+import { requestAiChat, AiProviderError } from "@/lib/ai/provider"
+
+export const defaultChatAiModel = "openai/gpt-4o-mini"
 
 export const chatSystemPrompt = `You are ScanZapp AI, a supportive Thai-first nutrition and healthy-habit assistant.
 Your role is educational. You are not a doctor, dietitian, emergency service, or a
@@ -150,7 +152,10 @@ export async function requestChatCompletion(input: {
   signal?: AbortSignal
   onDelta?: (text: string) => void
 }) {
-  const model = input.model?.trim() || process.env.QWEN_MODEL?.trim() || defaultAiModel
+  const model =
+    input.model?.trim() ||
+    process.env.CHAT_AI_MODEL?.trim() ||
+    defaultChatAiModel
   const completion = await requestAiChat({
     apiKey: input.apiKey,
     model,

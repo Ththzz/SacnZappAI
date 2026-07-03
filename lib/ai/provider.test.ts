@@ -34,6 +34,7 @@ describe("requestAiChat streaming", () => {
       apiKey: "test-key",
       model: "qwen/test",
       messages: [{ role: "user", content: "hello" }],
+      enableThinking: false,
       onDelta: (text) => deltas.push(text),
     })
 
@@ -43,6 +44,7 @@ describe("requestAiChat streaming", () => {
     expect(result.usage).toEqual({ inputTokens: 4, outputTokens: 2 })
     expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({
       stream: true,
+      enable_thinking: false,
     })
   })
 
