@@ -1,42 +1,54 @@
 "use client"
 
 import Link from "next/link"
-import { useRouter } from "next/navigation"
-import { FormEvent, useState } from "react"
+import { FormEvent, useRef, useState } from "react"
 import { ArrowRight, LoaderCircle, UserPlus } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import AuthShell from "@/components/auth/AuthShell"
 
 export default function SignUpPage() {
-  const router = useRouter()
   const [error, setError] = useState("")
   const [loading, setLoading] = useState(false)
+  const submittingRef = useRef(false)
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
+    if (submittingRef.current) return
+
+    submittingRef.current = true
     setError("")
     setLoading(true)
+    let navigationStarted = false
 
-    const form = new FormData(event.currentTarget)
-    const response = await fetch("/api/auth/sign-up", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name: form.get("name"),
-        email: form.get("email"),
-        password: form.get("password"),
-      }),
-    })
-    const data = (await response.json().catch(() => ({}))) as { error?: string }
+    try {
+      const form = new FormData(event.currentTarget)
+      const response = await fetch("/api/auth/sign-up", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: form.get("name"),
+          email: form.get("email"),
+          password: form.get("password"),
+        }),
+      })
+      const data = (await response.json().catch(() => ({}))) as { error?: string }
 
-    setLoading(false)
-    if (!response.ok) {
-      setError(data.error ?? "สมัครสมาชิกไม่สำเร็จ")
-      return
+      if (!response.ok) {
+        setError(data.error ?? "สมัครสมาชิกไม่สำเร็จ")
+        return
+      }
+
+      navigationStarted = true
+      window.location.replace("/onboarding")
+    } catch {
+      setError("เชื่อมต่อเซิร์ฟเวอร์ไม่สำเร็จ กรุณาลองใหม่")
+    } finally {
+      // Keep the form locked while a successful full-page navigation is in progress.
+      if (!navigationStarted) {
+        submittingRef.current = false
+        setLoading(false)
+      }
     }
-
-    router.replace("/onboarding")
-    router.refresh()
   }
 
   return (
@@ -48,14 +60,14 @@ export default function SignUpPage() {
           <p className="mt-2 text-sm leading-6 text-neutral-500">สมัครแล้วตั้งค่าโปรไฟล์และเป้าหมายสุขภาพได้ทันที</p>
         </div>
 
-        <form className="space-y-4" onSubmit={handleSubmit}>
+        <form className="space-y-4" onSubmit={handleSubmit} aria-busy={loading}>
           <Field label="ชื่อ" name="name" type="text" autoComplete="name" />
           <Field label="อีเมล" name="email" type="email" autoComplete="email" />
           <Field label="รหัสผ่าน" name="password" type="password" autoComplete="new-password" />
 
           {error && <div className="rounded-xl bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-600">{error}</div>}
 
-          <Button className="h-12 w-full rounded-xl bg-[#2ec78f] text-white hover:bg-[#20b77f]" disabled={loading}>
+          <Button type="submit" className="h-12 w-full rounded-xl bg-[#2ec78f] text-white hover:bg-[#20b77f]" disabled={loading}>
             {loading ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <UserPlus className="h-4 w-4" />}
             สมัครสมาชิก
             {!loading && <ArrowRight className="h-4 w-4" />}

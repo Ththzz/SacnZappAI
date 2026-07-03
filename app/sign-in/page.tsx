@@ -1,8 +1,8 @@
 "use client"
 
 import Link from "next/link"
-import { useRouter, useSearchParams } from "next/navigation"
-import { FormEvent, useState } from "react"
+import { useSearchParams } from "next/navigation"
+import { FormEvent, useRef, useState } from "react"
 import { ArrowRight, LoaderCircle, LockKeyhole, Mail } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import AuthShell from "@/components/auth/AuthShell"
@@ -13,40 +13,53 @@ function getSafeNext(value: string | null) {
 }
 
 export default function SignInPage() {
-  const router = useRouter()
   const searchParams = useSearchParams()
   const [error, setError] = useState("")
   const [loading, setLoading] = useState(false)
+  const submittingRef = useRef(false)
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
+    if (submittingRef.current) return
+
+    submittingRef.current = true
     setError("")
     setLoading(true)
+    let navigationStarted = false
 
-    const form = new FormData(event.currentTarget)
-    const response = await fetch("/api/auth/sign-in", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        email: form.get("email"),
-        password: form.get("password"),
-      }),
-    })
-    const data = (await response.json().catch(() => ({}))) as { error?: string; user?: { role?: "user" | "admin" } }
+    try {
+      const form = new FormData(event.currentTarget)
+      const response = await fetch("/api/auth/sign-in", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: form.get("email"),
+          password: form.get("password"),
+        }),
+      })
+      const data = (await response.json().catch(() => ({}))) as { error?: string; user?: { role?: "user" | "admin" } }
 
-    setLoading(false)
-    if (!response.ok) {
-      setError(data.error ?? "เข้าสู่ระบบไม่สำเร็จ")
-      return
+      if (!response.ok) {
+        setError(data.error ?? "เข้าสู่ระบบไม่สำเร็จ")
+        return
+      }
+
+      const destination = getSafeNext(searchParams.get("next"))
+      navigationStarted = true
+      window.location.replace(
+        data.user?.role === "admin"
+          ? "/admin"
+          : `/onboarding?next=${encodeURIComponent(destination)}`,
+      )
+    } catch {
+      setError("เชื่อมต่อเซิร์ฟเวอร์ไม่สำเร็จ กรุณาลองใหม่")
+    } finally {
+      // Keep the form locked while a successful full-page navigation is in progress.
+      if (!navigationStarted) {
+        submittingRef.current = false
+        setLoading(false)
+      }
     }
-
-    const destination = getSafeNext(searchParams.get("next"))
-    router.replace(
-      data.user?.role === "admin"
-        ? "/admin"
-        : `/onboarding?next=${encodeURIComponent(destination)}`,
-    )
-    router.refresh()
   }
 
   return (
@@ -58,13 +71,13 @@ export default function SignInPage() {
           <p className="mt-2 text-sm leading-6 text-neutral-500">ติดตามโภชนาการและสุขภาพของคุณต่อจากที่ค้างไว้</p>
         </div>
 
-        <form className="space-y-5" onSubmit={handleSubmit}>
+        <form className="space-y-5" onSubmit={handleSubmit} aria-busy={loading}>
           <Field label="อีเมล" name="email" type="email" autoComplete="email" icon={<Mail className="h-4 w-4" />} />
           <Field label="รหัสผ่าน" name="password" type="password" autoComplete="current-password" icon={<LockKeyhole className="h-4 w-4" />} />
 
           {error && <div className="rounded-xl bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-600">{error}</div>}
 
-          <Button className="h-12 w-full rounded-xl bg-[#2ec78f] text-white hover:bg-[#20b77f]" disabled={loading}>
+          <Button type="submit" className="h-12 w-full rounded-xl bg-[#2ec78f] text-white hover:bg-[#20b77f]" disabled={loading}>
             {loading ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <>เข้าสู่ระบบ <ArrowRight className="h-4 w-4" /></>}
           </Button>
         </form>
