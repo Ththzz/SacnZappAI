@@ -22,6 +22,21 @@ function LayoutFrame({ children, header }: { children: ReactNode; header: ReactN
   );
 }
 
+function MobileSidebarBackdrop() {
+  const { isSidebarOpen, setIsSidebarOpen } = useSidebar();
+
+  if (!isSidebarOpen) return null;
+
+  return (
+    <button
+      type="button"
+      aria-label="ปิดเมนูด้านข้าง"
+      onClick={() => setIsSidebarOpen(false)}
+      className="fixed inset-0 z-30 bg-black/35 md:hidden"
+    />
+  );
+}
+
 export default function LayoutClient({
   children,
   header,
@@ -41,6 +56,7 @@ export default function LayoutClient({
 
   return (
     <SidebarProvider>
+      <MobileSidebarBackdrop />
       <Sidebar user={user} />
       <LayoutFrame header={header}>{children}</LayoutFrame>
     </SidebarProvider>

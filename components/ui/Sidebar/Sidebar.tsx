@@ -38,7 +38,7 @@ const Sidebar = ({ user }: { user?: UserSummary | null }) => {
   const visibleMenuList = isAdmin ? [...menuList, { link: '/admin', text: 'แอดมิน', icon: ShieldCheck }] : menuList
 
   return (
-    <div className={`fixed left-0 top-0 z-40 flex max-h-dvh flex-col transition-none md:h-dvh md:min-h-0 md:border-r md:bg-white md:transition-[width] md:duration-150 ${
+    <div id="app-sidebar" className={`fixed left-0 top-0 z-40 flex max-h-dvh flex-col transition-none md:h-dvh md:min-h-0 md:border-r md:bg-white md:transition-[width] md:duration-150 ${
       isSidebarOpen
         ? "h-dvh min-h-0 w-[280px] border-r bg-white"
         : "h-16 w-16 overflow-hidden md:h-dvh md:w-[80px] md:overflow-visible"
@@ -52,6 +52,8 @@ const Sidebar = ({ user }: { user?: UserSummary | null }) => {
             isSidebarOpen ? "" : "md:bg-transparent"
           }`}
           aria-label={isSidebarOpen ? 'ย่อเมนู' : 'ขยายเมนู'}
+          aria-controls="app-sidebar"
+          aria-expanded={isSidebarOpen}
         >
           <Menu
             size={24}
@@ -91,12 +93,6 @@ const Sidebar = ({ user }: { user?: UserSummary | null }) => {
                 key={item.link}
                 href={item.link}
                 prefetch={item.link === '/' ? false : undefined}
-                onClick={(event) => {
-                  if (item.link === '/' && pathname !== '/') {
-                    event.preventDefault()
-                    window.location.assign('/')
-                  }
-                }}
                 aria-current={pathname === item.link ? 'page' : undefined}
                 className={`flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors duration-100 ${
                   active ? 'bg-[#2EC78F]/10 text-[#2EC78F]' : 'hover:bg-gray-100'
