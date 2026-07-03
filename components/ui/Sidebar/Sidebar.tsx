@@ -38,12 +38,12 @@ const Sidebar = ({ user }: { user?: UserSummary | null }) => {
   const visibleMenuList = isAdmin ? [...menuList, { link: '/admin', text: 'แอดมิน', icon: ShieldCheck }] : menuList
 
   return (
-    <div className={`fixed left-0 top-0 z-40 flex flex-col transition-none md:min-h-screen md:border-r md:bg-white md:transition-[width] md:duration-150 ${
+    <div className={`fixed left-0 top-0 z-40 flex max-h-dvh flex-col transition-none md:h-dvh md:min-h-0 md:border-r md:bg-white md:transition-[width] md:duration-150 ${
       isSidebarOpen
-        ? "min-h-screen w-[280px] border-r bg-white"
-        : "h-16 w-16 overflow-hidden md:h-auto md:w-[80px] md:overflow-visible"
+        ? "h-dvh min-h-0 w-[280px] border-r bg-white"
+        : "h-16 w-16 overflow-hidden md:h-dvh md:w-[80px] md:overflow-visible"
     }`}>
-      <div className={`h-16 flex items-center font-semibold text-lg text-white md:bg-[#2EC78F] ${
+      <div className={`flex h-16 shrink-0 items-center text-lg font-semibold text-white md:bg-[#2EC78F] ${
         isSidebarOpen ? "bg-[#2EC78F] px-4" : "justify-center bg-transparent px-0 md:justify-start md:px-4"
       }`}>
         <button
@@ -75,9 +75,12 @@ const Sidebar = ({ user }: { user?: UserSummary | null }) => {
         </span>
       </div>
 
-      <div className={`flex-1 flex-col justify-between bg-white p-4 overflow-hidden ${
-        isSidebarOpen ? "flex" : "hidden md:flex"
-      }`}>
+      <div
+        className={`min-h-0 flex-1 flex-col justify-between overflow-y-auto overscroll-contain bg-white px-4 pt-4 touch-pan-y ${
+          isSidebarOpen ? "flex" : "hidden md:flex"
+        }`}
+        style={{ paddingBottom: "max(1rem, env(safe-area-inset-bottom))" }}
+      >
         <div className="flex flex-col gap-2">
           {visibleMenuList.map((item) => {
             const Icon = item.icon
