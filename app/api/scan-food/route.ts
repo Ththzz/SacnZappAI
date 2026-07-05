@@ -63,6 +63,17 @@ function isBusyModelMessage(message?: string) {
 }
 
 function friendlyModelError(message: string | undefined, model: string) {
+  const normalized = message?.trimStart().toLowerCase() ?? ""
+  const isHtmlResponse =
+    normalized.startsWith("<!doctype html") ||
+    normalized.startsWith("<html") ||
+    normalized.includes("<html") ||
+    normalized.includes("cloudflare")
+
+  if (isHtmlResponse) {
+    return "บริการวิเคราะห์อาหารขัดข้องชั่วคราว กรุณารอสักครู่แล้วลองสแกนใหม่อีกครั้ง"
+  }
+
   if (isBusyModelMessage(message)) {
     return `ระบบวิเคราะห์ด้วย ${model} กำลังมีผู้ใช้งานเยอะ กรุณาลองสแกนใหม่อีกครั้งในอีกสักครู่`
   }

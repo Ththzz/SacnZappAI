@@ -103,6 +103,16 @@ function getFriendlyScanError(message?: string) {
   if (!message) return 'วิเคราะห์รูปไม่สำเร็จ กรุณาลองใหม่อีกครั้ง'
 
   const normalized = message.toLowerCase()
+  const isHtmlResponse =
+    normalized.includes('<!doctype html') ||
+    normalized.includes('<html') ||
+    normalized.includes('cloudflare') ||
+    normalized.includes("unexpected token '<'")
+
+  if (isHtmlResponse) {
+    return 'บริการวิเคราะห์อาหารขัดข้องชั่วคราว กรุณารอสักครู่แล้วลองสแกนใหม่อีกครั้ง'
+  }
+
   const modelIsBusy =
     normalized.includes('high demand') ||
     normalized.includes('try again later') ||
@@ -182,7 +192,17 @@ export default function ScanPageClient() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ image }),
       })
-      const data = (await response.json()) as Partial<ApiResult> & { error?: string }
+      const rawBody = await response.text()
+      let data: Partial<ApiResult> & { error?: string }
+      try {
+        data = JSON.parse(rawBody) as Partial<ApiResult> & { error?: string }
+      } catch {
+        throw new Error(
+          response.status >= 500
+            ? 'บริการวิเคราะห์อาหารขัดข้องชั่วคราว กรุณารอสักครู่แล้วลองสแกนใหม่อีกครั้ง'
+            : 'ระบบสแกนตอบกลับในรูปแบบที่ไม่ถูกต้อง กรุณาลองใหม่อีกครั้ง',
+        )
+      }
 
       if (!response.ok) {
         throw new Error(getFriendlyScanError(data.error))

@@ -97,4 +97,29 @@ describe("requestAiChat streaming", () => {
     ).rejects.toBeInstanceOf(AiProviderError)
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
+
+  it("replaces an upstream HTML error page with a safe message", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response("<!DOCTYPE html><html><title>Cloudflare error</title></html>", {
+        status: 403,
+        headers: { "Content-Type": "text/html" },
+      }),
+    )
+
+    await expect(
+      requestAiChat({
+        apiKey: "test-key",
+        messages: [{ role: "user", content: "hello" }],
+      }),
+    ).rejects.toMatchObject({
+      message: expect.stringContaining("บริการ AI ต้นทางขัดข้องชั่วคราว"),
+    })
+
+    await expect(
+      requestAiChat({
+        apiKey: "test-key",
+        messages: [{ role: "user", content: "hello" }],
+      }),
+    ).rejects.not.toThrow("<!DOCTYPE html>")
+  })
 })

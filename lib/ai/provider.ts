@@ -53,6 +53,16 @@ function parseJsonPayload(rawBody: string): Record<string, unknown> | null {
   }
 }
 
+function looksLikeHtmlResponse(rawBody: string) {
+  const normalized = rawBody.trimStart().slice(0, 1_000).toLowerCase()
+  return (
+    normalized.startsWith("<!doctype html") ||
+    normalized.startsWith("<html") ||
+    normalized.includes("<html") ||
+    normalized.includes("cloudflare")
+  )
+}
+
 function parseStreamedPayload(rawBody: string): { payload: Record<string, unknown>; content: string } | null {
   const dataLines = rawBody
     .split(/\r?\n/)
@@ -253,10 +263,13 @@ export async function requestAiChat(input: {
   const { payload, content } = parseResponseBody(rawBody)
 
   if (!response.ok) {
-    const upstreamMessage =
+    const structuredMessage =
       payload && "error" in payload
         ? (payload as { error?: { message?: string } }).error?.message
-        : rawBody.slice(0, 300) || undefined
+        : undefined
+    const upstreamMessage = looksLikeHtmlResponse(rawBody)
+      ? `บริการ AI ต้นทางขัดข้องชั่วคราว (HTTP ${response.status}) กรุณาลองใหม่อีกครั้ง`
+      : structuredMessage || rawBody.slice(0, 300) || undefined
     throw new AiProviderError(
       normalizeAiBusyMessage(upstreamMessage, model),
       retryableStatuses.has(response.status) ? 503 : 502,
