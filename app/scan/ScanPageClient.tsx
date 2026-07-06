@@ -18,6 +18,7 @@ import {
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
+  addMealEntry,
   getLocalDateKey,
   getTimeBasedMealCategory,
   MEAL_CATEGORY_LABELS,
@@ -369,6 +370,7 @@ export default function ScanPageClient() {
         throw new Error(payload?.error || 'บันทึกมื้ออาหารไม่สำเร็จ')
       }
 
+      addMealEntry(entry)
       notifyMealHistoryUpdated()
       setSaved(true)
     } catch (saveError) {

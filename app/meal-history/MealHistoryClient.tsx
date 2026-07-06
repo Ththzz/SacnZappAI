@@ -19,6 +19,7 @@ import {
   X,
 } from "lucide-react"
 import {
+  addMealEntry,
   getLocalDateKey,
   getTimeBasedMealCategory,
   isMealCategory,
@@ -29,6 +30,8 @@ import {
   readMealEntries,
   resolveMealCategory,
   type MealCategory,
+  type MealEntry,
+  writeMealEntries,
 } from "@/lib/user-data"
 import PageDataLoading from "@/components/ui/PageDataLoading"
 
@@ -48,6 +51,23 @@ type DayMeal = {
   confidence?: number
   note?: string
   mealCategory: MealCategory
+}
+
+function toMealEntry(meal: DayMeal, source?: MealEntry["source"]): MealEntry {
+  return {
+    id: meal.id,
+    name: meal.name,
+    time: meal.time,
+    date: meal.date,
+    calories: meal.calories,
+    protein: meal.protein ?? 0,
+    carbs: meal.carbs ?? 0,
+    fat: meal.fat ?? 0,
+    source: source ?? (meal.source === "manual" ? "manual" : "scan"),
+    confidence: meal.confidence,
+    note: meal.note,
+    mealCategory: meal.mealCategory,
+  }
 }
 
 type WeekDaySummary = {
@@ -237,6 +257,7 @@ export default function MealHistoryClient() {
     ])
 
     if (mealResult.status === "fulfilled") {
+      writeMealEntries(mealResult.value)
       setHistoryMeals(convertMeals(mealResult.value))
     }
     if (settingsResult.status === "fulfilled") {
@@ -303,6 +324,7 @@ export default function MealHistoryClient() {
         const payload = (await response.json().catch(() => null)) as { error?: string } | null
         throw new Error(payload?.error || "ลบมื้ออาหารไม่สำเร็จ")
       }
+      writeMealEntries(readMealEntries().filter((meal) => meal.id !== mealId))
       notifyMealHistoryUpdated()
     } catch (error) {
       setHistoryMeals(previousMeals)
@@ -343,6 +365,11 @@ export default function MealHistoryClient() {
         const payload = (await response.json().catch(() => null)) as { error?: string } | null
         throw new Error(payload?.error || "อัปเดตมื้ออาหารไม่สำเร็จ")
       }
+      writeMealEntries(
+        readMealEntries().map((meal) =>
+          meal.id === updatedMeal.id ? toMealEntry(updatedMeal) : meal,
+        ),
+      )
       notifyMealHistoryUpdated()
     } catch (error) {
       setHistoryMeals(previousMeals)
@@ -379,6 +406,7 @@ export default function MealHistoryClient() {
         const payload = (await response.json().catch(() => null)) as { error?: string } | null
         throw new Error(payload?.error || "บันทึกมื้ออาหารไม่สำเร็จ")
       }
+      addMealEntry(toMealEntry(meal, "manual"))
       notifyMealHistoryUpdated()
       setAddingMeal(false)
     } catch (error) {
