@@ -681,15 +681,17 @@ function MealSuggestionsCard({
         {macroBalance.map((macro) => <span key={macro.label}>{macro.label} {macro.value}</span>)}
       </div>
 
-      {(refreshing || isStale || error) && (
-        <div className={`mt-4 flex items-start gap-2 rounded-xl px-4 py-3 text-xs font-semibold ${refreshing || (isStale && !error) ? "bg-amber-50 text-amber-700" : "bg-rose-50 text-rose-700"}`}>
+      {(refreshing || isStale || error || suggestionSource === "fallback") && (
+        <div className={`mt-4 flex items-start gap-2 rounded-xl px-4 py-3 text-xs font-semibold ${refreshing || (isStale && !error) || suggestionSource === "fallback" ? "bg-amber-50 text-amber-700" : "bg-rose-50 text-rose-700"}`}>
           <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
           <span>
             {refreshing
               ? "กำลังสร้างคำแนะนำใหม่ กรุณารอสักครู่"
               : error
                 ? error
-                : "กำลังแสดงคำแนะนำที่บันทึกไว้ก่อนหน้า กดสร้างคำแนะนำใหม่เมื่อต้องการอัปเดต"}
+                : suggestionSource === "fallback"
+                  ? "AI ตอบไม่ทัน ระบบจึงสร้างคำแนะนำสำรองจากข้อมูลย้อนหลัง 7 วันและบันทึกไว้ให้แล้ว"
+                  : "กำลังแสดงคำแนะนำที่บันทึกไว้ก่อนหน้า กดสร้างคำแนะนำใหม่เมื่อต้องการอัปเดต"}
           </span>
         </div>
       )}

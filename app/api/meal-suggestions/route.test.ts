@@ -128,22 +128,23 @@ describe("meal suggestions cache", () => {
     expect(requestAiChat).toHaveBeenCalledTimes(1)
     expect(requestAiChat).toHaveBeenCalledWith(expect.objectContaining({
       model: "qwen/qwen3.6-flash",
-      timeoutMs: 12_000,
+      timeoutMs: 25_000,
       maxTokens: 320,
       enableThinking: false,
     }))
     expect(upsertCache).toHaveBeenCalledTimes(1)
   })
 
-  it("returns an error and preserves the existing cache when generation fails", async () => {
+  it("creates and saves fallback suggestions when AI generation fails", async () => {
     requestAiChat.mockRejectedValue(new Error("AI unavailable"))
 
     const response = await POST()
     const body = await response.json()
 
-    expect(response.status).toBe(502)
-    expect(body.error).toContain("สร้างคำแนะนำใหม่ไม่สำเร็จ")
-    expect(upsertCache).not.toHaveBeenCalled()
+    expect(response.status).toBe(200)
+    expect(body.source).toBe("fallback")
+    expect(body.suggestions).toHaveLength(3)
+    expect(upsertCache).toHaveBeenCalledTimes(1)
   })
 
   it("does not call AI when POST has no recent meals", async () => {
@@ -155,5 +156,18 @@ describe("meal suggestions cache", () => {
     expect(response.status).toBe(422)
     expect(body.error).toContain("ต้องมีข้อมูลมื้ออาหาร")
     expect(requestAiChat).not.toHaveBeenCalled()
+  })
+
+  it("creates fallback suggestions when the AI key is missing", async () => {
+    delete process.env.QWEN_API_KEY
+
+    const response = await POST()
+    const body = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(body.source).toBe("fallback")
+    expect(body.suggestions).toHaveLength(3)
+    expect(requestAiChat).not.toHaveBeenCalled()
+    expect(upsertCache).toHaveBeenCalledTimes(1)
   })
 })
