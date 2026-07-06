@@ -6,10 +6,6 @@ export function createChatAbortController(assistantMessageId: string) {
   return controller
 }
 
-export function getChatAbortSignal(assistantMessageId: string) {
-  return activeChatControllers.get(assistantMessageId)?.signal
-}
-
 export function stopActiveChat(assistantMessageId: string) {
   const controller = activeChatControllers.get(assistantMessageId)
   if (!controller) return false

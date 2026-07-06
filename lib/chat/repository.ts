@@ -175,21 +175,6 @@ function activeConversationWhere(userId: string, conversationId: string) {
   }
 }
 
-export function conversationOwnershipWhere(userId: string, conversationId: string) {
-  return {
-    id: conversationId,
-    userId,
-  }
-}
-
-export function messageOwnershipWhere(userId: string, messageId: string, conversationId: string) {
-  return {
-    id: messageId,
-    userId,
-    conversationId,
-  }
-}
-
 export async function createConversation(db: ChatDbClient, input: CreateConversationInput) {
   return db.conversation.create({
     data: {

@@ -74,7 +74,7 @@ export function extractJsonFromFoodContent(content: string): string {
   return content
 }
 
-export function buildFoodAnalysisMessages(model: string, mimeType: string, imageData: string) {
+export function buildFoodAnalysisMessages(mimeType: string, imageData: string) {
   return [
     {
       role: "system" as const,
@@ -114,7 +114,7 @@ export async function analyzeFoodImage(input: {
   const completion = await requestAiChat({
     apiKey: input.apiKey,
     model,
-    messages: buildFoodAnalysisMessages(model, parsedImage.mimeType, parsedImage.imageData),
+    messages: buildFoodAnalysisMessages(parsedImage.mimeType, parsedImage.imageData),
   })
 
   const jsonStr = extractJsonFromFoodContent(completion.text)

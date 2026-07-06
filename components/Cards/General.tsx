@@ -3,52 +3,24 @@
 import { useEffect, useState } from "react"
 import { Droplets, Plus, Sun, Target, Utensils } from "lucide-react"
 import { Card, CardContent } from "@/components/ui/card"
+import type { DashboardData } from "@/lib/dashboard"
 import {
   getLocalDateKey,
   MEAL_CATEGORY_LABELS,
-  readMealEntries,
-  readWaterLogs,
   resolveMealCategory,
   type MealCategory,
-  type MealEntry,
-  type WaterLogEntry,
   writeMealEntries,
   writeWaterLogs,
 } from "@/lib/user-data"
 import LegacyMealClassifier from "./LegacyMealClassifier"
 
-type DashboardData = {
-  meals: MealEntry[]
-  waterLogs: WaterLogEntry[]
-  calorieGoal: number | null
-}
-
 const DASHBOARD_CACHE_KEY = "nutriscan.dashboard.v1"
-const SETTINGS_STORAGE_KEY = "nutriscan.settings.v1"
-const EMPTY_DASHBOARD: DashboardData = {
-  meals: [],
-  waterLogs: [],
-  calorieGoal: null,
-}
 
-export default function General() {
-  const [dashboard, setDashboard] = useState<DashboardData>(EMPTY_DASHBOARD)
+export default function General({ initialData }: { initialData: DashboardData }) {
   const [animationRatio, setAnimationRatio] = useState(0)
-  const { meals, waterLogs, calorieGoal } = dashboard
+  const { meals, waterLogs, calorieGoal } = initialData
 
   useEffect(() => {
-    const cached = readDashboardCache()
-    const localMeals = readMealEntries()
-    const localWaterLogs = readWaterLogs()
-    const localCalorieGoal = readStoredCalorieGoal()
-    const immediateData: DashboardData = {
-      meals: localMeals.length > 0 ? localMeals : cached?.meals ?? [],
-      waterLogs: localWaterLogs.length > 0 ? localWaterLogs : cached?.waterLogs ?? [],
-      calorieGoal: localCalorieGoal ?? cached?.calorieGoal ?? null,
-    }
-    setDashboard(immediateData)
-
-    const controller = new AbortController()
     let animationFrame = 0
     const startAnimation = () => {
       setAnimationRatio(0)
@@ -63,38 +35,15 @@ export default function General() {
       })
     }
 
-    fetch("/api/dashboard", { signal: controller.signal })
-      .then(async (response) => {
-        const data = await response.json() as Partial<DashboardData>
-        if (!response.ok) throw new Error("dashboard")
-        return data
-      })
-      .then((serverData) => {
-        if (controller.signal.aborted) return
-
-        const nextData: DashboardData = {
-          meals: Array.isArray(serverData.meals) ? serverData.meals : immediateData.meals,
-          waterLogs: Array.isArray(serverData.waterLogs) ? serverData.waterLogs : immediateData.waterLogs,
-          calorieGoal: typeof serverData.calorieGoal === "number"
-            ? serverData.calorieGoal
-            : immediateData.calorieGoal,
-        }
-        setDashboard(nextData)
-        window.localStorage.setItem(DASHBOARD_CACHE_KEY, JSON.stringify(nextData))
-        writeMealEntries(nextData.meals)
-        writeWaterLogs(nextData.waterLogs)
-        startAnimation()
-      })
-      .catch(() => {
-        if (controller.signal.aborted) return
-        startAnimation()
-      })
+    window.localStorage.setItem(DASHBOARD_CACHE_KEY, JSON.stringify(initialData))
+    writeMealEntries(initialData.meals)
+    writeWaterLogs(initialData.waterLogs)
+    startAnimation()
 
     return () => {
-      controller.abort()
       window.cancelAnimationFrame(animationFrame)
     }
-  }, [])
+  }, [initialData])
 
   const todayKey = getLocalDateKey()
   const todayMeals = meals.filter((meal) => meal.date === todayKey)
@@ -307,31 +256,4 @@ export default function General() {
       </section>
     </div>
   )
-}
-
-function readDashboardCache(): DashboardData | null {
-  try {
-    const raw = window.localStorage.getItem(DASHBOARD_CACHE_KEY)
-    if (!raw) return null
-    const parsed = JSON.parse(raw) as Partial<DashboardData>
-    return {
-      meals: Array.isArray(parsed.meals) ? parsed.meals : [],
-      waterLogs: Array.isArray(parsed.waterLogs) ? parsed.waterLogs : [],
-      calorieGoal: typeof parsed.calorieGoal === "number" ? parsed.calorieGoal : null,
-    }
-  } catch {
-    return null
-  }
-}
-
-function readStoredCalorieGoal() {
-  try {
-    const raw = window.localStorage.getItem(SETTINGS_STORAGE_KEY)
-    if (!raw) return null
-    const parsed = JSON.parse(raw) as { healthGoal?: { dailyCalories?: number } }
-    const value = Number(parsed.healthGoal?.dailyCalories)
-    return Number.isFinite(value) && value > 0 ? Math.round(value) : null
-  } catch {
-    return null
-  }
 }

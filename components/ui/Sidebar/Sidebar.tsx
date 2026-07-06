@@ -92,7 +92,7 @@ const Sidebar = ({ user }: { user?: UserSummary | null }) => {
               <Link
                 key={item.link}
                 href={item.link}
-                prefetch
+                prefetch={false}
                 aria-current={pathname === item.link ? 'page' : undefined}
                 className={`flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors duration-100 ${
                   active ? 'bg-[#2EC78F]/10 text-[#2EC78F]' : 'hover:bg-gray-100'

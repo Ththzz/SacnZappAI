@@ -98,10 +98,6 @@ export function buildChatTitle(message: string) {
   return normalized.slice(0, 60)
 }
 
-export function buildChatMessages(history: ChatHistoryMessage[], nextUserMessage: string): ProviderMessage[] {
-  return buildChatMessagesWithContext({ history, nextUserMessage })
-}
-
 export function buildChatMessagesWithContext(input: {
   history: ChatHistoryMessage[]
   nextUserMessage: string
