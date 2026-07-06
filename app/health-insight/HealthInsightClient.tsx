@@ -42,7 +42,7 @@ import {
 
 type FoodAlert = {
   id: string
-  icon: typeof Beef
+  icon: "protein" | "water"
   title: string
   description: string
   colorClass: string
@@ -107,13 +107,16 @@ type SuggestionCachePayload = {
 const INSIGHT_CACHE_KEY = "scanzapp.health-insight.cache.v1"
 const SUGGESTION_CACHE_KEY = "scanzapp.meal-suggestions.cache.v1"
 const CACHE_MAX_AGE_MS = 5 * 60 * 1000
+const FOOD_ALERT_ICONS = {
+  protein: Beef,
+  water: Droplets,
+} as const
 
 const chartHeight = 150
 function getCalorieGoal(payload: SettingsPayload): number | null {
   const calories = Number(payload.settings?.healthGoal?.dailyCalories)
   return Number.isFinite(calories) && calories > 0 ? Math.round(calories) : null
 }
-
 
 function normalizedName(value: string) {
   return value.trim().toLocaleLowerCase("th-TH").replace(/\s+/g, " ")
@@ -123,6 +126,74 @@ function parseApiError(data: unknown, fallback: string) {
   if (!data || typeof data !== "object") return fallback
   const message = (data as { error?: unknown }).error
   return typeof message === "string" && message ? message : fallback
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value)
+}
+
+function isValidDateString(value: unknown): value is string {
+  return typeof value === "string" && !Number.isNaN(new Date(value).getTime())
+}
+
+function toSafeNumber(value: unknown) {
+  const number = Number(value)
+  return Number.isFinite(number) ? number : 0
+}
+
+function parseMealSuggestion(value: unknown): MealSuggestion | null {
+  if (!isRecord(value) || typeof value.id !== "string" || typeof value.name !== "string") return null
+
+  return {
+    id: value.id,
+    name: value.name,
+    calories: Math.max(0, Math.round(toSafeNumber(value.calories))),
+    protein: Math.max(0, Math.round(toSafeNumber(value.protein))),
+    carbs: Math.max(0, Math.round(toSafeNumber(value.carbs))),
+    fat: Math.max(0, Math.round(toSafeNumber(value.fat))),
+    reason: typeof value.reason === "string" ? value.reason : "",
+  }
+}
+
+function parseSavedMealSuggestion(value: unknown): SavedMealSuggestion | null {
+  if (!isRecord(value) || typeof value.createdAt !== "string") return null
+  const base = parseMealSuggestion(value)
+  return base ? { ...base, createdAt: value.createdAt } : null
+}
+
+function parseCalorieTrendPoint(value: unknown): CalorieTrendPoint | null {
+  if (!isRecord(value) || typeof value.date !== "string" || typeof value.day !== "string") return null
+  const status = value.status
+  if (status !== "good" && status !== "over" && status !== "empty") return null
+
+  return {
+    date: value.date,
+    day: value.day,
+    calories: Math.max(0, toSafeNumber(value.calories)),
+    status,
+  }
+}
+
+function parseMacroBalanceItem(value: unknown): MacroBalanceItem | null {
+  if (!isRecord(value) || typeof value.label !== "string" || typeof value.value !== "string") return null
+  return { label: value.label, value: value.value }
+}
+
+function parseFoodAlert(value: unknown): FoodAlert | null {
+  if (!isRecord(value)) return null
+  const icon = value.icon
+  if ((icon !== "protein" && icon !== "water") || typeof value.id !== "string" || typeof value.title !== "string") {
+    return null
+  }
+
+  return {
+    id: value.id,
+    icon,
+    title: value.title,
+    description: typeof value.description === "string" ? value.description : "",
+    colorClass: typeof value.colorClass === "string" ? value.colorClass : "",
+    iconClass: typeof value.iconClass === "string" ? value.iconClass : "",
+  }
 }
 
 function readSessionCache<T>(key: string) {
@@ -147,9 +218,58 @@ function writeSessionCache<T>(key: string, data: T) {
   }
 }
 
+function readInsightCache() {
+  const cached = readSessionCache<unknown>(INSIGHT_CACHE_KEY)
+  if (!isRecord(cached)) return null
+
+  const calorieTrend = Array.isArray(cached.calorieTrend)
+    ? cached.calorieTrend.map(parseCalorieTrendPoint).filter((item): item is CalorieTrendPoint => item !== null)
+    : []
+  const foodAlerts = Array.isArray(cached.foodAlerts)
+    ? cached.foodAlerts.map(parseFoodAlert).filter((item): item is FoodAlert => item !== null)
+    : []
+  const macroBalance = Array.isArray(cached.macroBalance)
+    ? cached.macroBalance.map(parseMacroBalanceItem).filter((item): item is MacroBalanceItem => item !== null)
+    : []
+  const savedSuggestions = Array.isArray(cached.savedSuggestions)
+    ? cached.savedSuggestions.map(parseSavedMealSuggestion).filter((item): item is SavedMealSuggestion => item !== null)
+    : []
+
+  return {
+    mealCount: Math.max(0, toSafeNumber(cached.mealCount)),
+    calorieGoal: Number.isFinite(Number(cached.calorieGoal)) ? Math.max(0, Math.round(Number(cached.calorieGoal))) : null,
+    calorieTrend,
+    foodAlerts,
+    macroBalance: macroBalance.length > 0 ? macroBalance : defaultMacroBalance,
+    savedSuggestions,
+  } satisfies InsightCachePayload
+}
+
+function readSuggestionCache() {
+  const cached = readSessionCache<unknown>(SUGGESTION_CACHE_KEY)
+  if (!isRecord(cached)) return null
+
+  const mealSuggestions = Array.isArray(cached.mealSuggestions)
+    ? cached.mealSuggestions.map(parseMealSuggestion).filter((item): item is MealSuggestion => item !== null)
+    : []
+
+  return {
+    mealSuggestions,
+    suggestionSource: typeof cached.suggestionSource === "string" ? cached.suggestionSource : "",
+    suggestionGeneratedAt: isValidDateString(cached.suggestionGeneratedAt) ? cached.suggestionGeneratedAt : null,
+    suggestionStale: Boolean(cached.suggestionStale),
+    suggestionError: typeof cached.suggestionError === "string" ? cached.suggestionError : null,
+  } satisfies SuggestionCachePayload
+}
+
+function formatGeneratedAtLabel(value: string | null) {
+  if (!isValidDateString(value)) return null
+  return new Intl.DateTimeFormat("th-TH", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value))
+}
+
 export default function HealthInsightClient() {
-  const initialInsightCache = readSessionCache<InsightCachePayload>(INSIGHT_CACHE_KEY)
-  const initialSuggestionCache = readSessionCache<SuggestionCachePayload>(SUGGESTION_CACHE_KEY)
+  const initialInsightCache = readInsightCache()
+  const initialSuggestionCache = readSuggestionCache()
   const [loading, setLoading] = useState(!initialInsightCache)
   const [suggestionLoading, setSuggestionLoading] = useState(!initialSuggestionCache)
   const [refreshing, setRefreshing] = useState(false)
@@ -269,7 +389,7 @@ export default function HealthInsightClient() {
       const avgProtein = totalProtein / recentMeals.length
       alerts.push({
         id: "protein",
-        icon: Beef,
+        icon: "protein",
         title: "โปรตีน",
         description: avgProtein < 20 ? "โปรตีนเฉลี่ยต่อมื้อใน 7 วันยังต่ำกว่า 20g" : "โปรตีนเฉลี่ยต่อมื้อใน 7 วันอยู่ในเกณฑ์ดี",
         colorClass: avgProtein < 20 ? "bg-rose-50" : "bg-emerald-50",
@@ -278,7 +398,7 @@ export default function HealthInsightClient() {
     }
     alerts.push({
       id: "water",
-      icon: Droplets,
+      icon: "water",
       title: "น้ำวันนี้",
       description: todayWaterMl > 0 ? `บันทึกแล้ว ${todayWaterMl.toLocaleString()} ml` : "ยังไม่มีข้อมูลน้ำดื่มวันนี้",
       colorClass: todayWaterMl > 0 ? "bg-emerald-50" : "bg-sky-50",
@@ -511,7 +631,7 @@ function FoodAlertsPanel({ foodAlerts }: { foodAlerts: FoodAlert[] }) {
     <aside className="space-y-4">
       <h2 className="text-base font-extrabold">แจ้งเตือนสารอาหาร</h2>
       {foodAlerts.map((alert) => {
-        const Icon = alert.icon
+        const Icon = FOOD_ALERT_ICONS[alert.icon]
         return (
           <article key={alert.id} className="grid grid-cols-[48px_1fr] items-center gap-3 rounded-2xl bg-white p-4 shadow-sm ring-1 ring-black/5">
             <div className={`flex h-12 w-12 items-center justify-center rounded-xl ${alert.colorClass}`}>
@@ -553,9 +673,7 @@ function MealSuggestionsCard({
   onRefresh: () => void
   onSave: (meal: MealSuggestion) => void
 }) {
-  const generatedLabel = generatedAt
-    ? new Intl.DateTimeFormat("th-TH", { dateStyle: "medium", timeStyle: "short" }).format(new Date(generatedAt))
-    : null
+  const generatedLabel = formatGeneratedAtLabel(generatedAt)
 
   return (
     <section className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-black/5">
