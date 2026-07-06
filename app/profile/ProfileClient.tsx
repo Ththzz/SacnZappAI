@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { BadgeCheck, Check, Goal, Target, UserRound } from "lucide-react"
 import { STORAGE_KEYS } from "@/lib/user-data"
 import PageDataLoading from "@/components/ui/PageDataLoading"
@@ -72,18 +72,20 @@ export default function ProfileClient({
   const [saving, setSaving] = useState(false)
   const [loaded, setLoaded] = useState(false)
   const savedProfile = useRef<StoredProfile>({ selectedGoal: "maintain", form: emptyForm })
+  const hasInteracted = useRef(false)
+  const profileRequested = useRef(false)
+
+  const applyStoredProfile = useCallback((stored: StoredProfile) => {
+    const nextGoal = goalOptions.some((goal) => goal.key === stored.selectedGoal)
+      ? stored.selectedGoal!
+      : "maintain"
+    const nextForm = { ...emptyForm, ...stored.form }
+    setSelectedGoal(nextGoal)
+    setForm(nextForm)
+    savedProfile.current = { selectedGoal: nextGoal, form: nextForm }
+  }, [])
 
   useEffect(() => {
-    const applyStoredProfile = (stored: StoredProfile) => {
-      const nextGoal = goalOptions.some((goal) => goal.key === stored.selectedGoal)
-        ? stored.selectedGoal!
-        : "maintain"
-      const nextForm = { ...emptyForm, ...stored.form }
-      setSelectedGoal(nextGoal)
-      setForm(nextForm)
-      savedProfile.current = { selectedGoal: nextGoal, form: nextForm }
-    }
-
     try {
       const raw = window.localStorage.getItem(STORAGE_KEYS.profile)
       if (raw) {
@@ -93,12 +95,19 @@ export default function ProfileClient({
     } catch {
       window.localStorage.removeItem(STORAGE_KEYS.profile)
     }
+  }, [applyStoredProfile])
 
+  useEffect(() => {
+    if (activeTab !== "profile" || profileRequested.current) return
+    profileRequested.current = true
     fetch("/api/profile")
       .then(async (response) => {
         const data = (await response.json().catch(() => ({}))) as { profile?: StoredProfile }
         if (!response.ok) throw new Error("api")
-        if (data.profile) applyStoredProfile(data.profile)
+        if (data.profile && !hasInteracted.current) {
+          applyStoredProfile(data.profile)
+          window.localStorage.setItem(STORAGE_KEYS.profile, JSON.stringify(data.profile))
+        }
       })
       .catch(() => {
         try {
@@ -109,9 +118,10 @@ export default function ProfileClient({
         }
       })
       .finally(() => setLoaded(true))
-  }, [])
+  }, [activeTab, applyStoredProfile])
 
   const handleFieldChange = (key: keyof ProfileForm, value: string) => {
+    hasInteracted.current = true
     setNotice(null)
     setForm((current) => ({
       ...current,
@@ -121,6 +131,7 @@ export default function ProfileClient({
   }
 
   const handleSave = async () => {
+    hasInteracted.current = true
     const profile = { selectedGoal, form }
     setSaving(true)
     setNotice(null)
@@ -143,6 +154,7 @@ export default function ProfileClient({
   }
 
   const handleCancel = () => {
+    hasInteracted.current = true
     setSelectedGoal(savedProfile.current.selectedGoal ?? "maintain")
     setForm({ ...emptyForm, ...savedProfile.current.form })
     setNotice(null)
@@ -154,6 +166,7 @@ export default function ProfileClient({
   }
 
   const applySyncedGoalProfile = (profile: SyncedProfile) => {
+    hasInteracted.current = true
     const nextGoal = goalOptions.some((goal) => goal.key === profile.selectedGoal)
       ? profile.selectedGoal as GoalKey
       : selectedGoal
@@ -179,7 +192,7 @@ export default function ProfileClient({
       ? Math.abs(currentWeight - targetWeight)
       : 0
 
-  if (!loaded) {
+  if (!loaded && activeTab === "profile") {
     return <PageDataLoading label="กำลังโหลดข้อมูลโปรไฟล์..." />
   }
 

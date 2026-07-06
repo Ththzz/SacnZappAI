@@ -29,27 +29,41 @@ export default function SettingsClient() {
   const [loaded, setLoaded] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
   const lastPersistedSettings = useRef("")
+  const hasInteracted = useRef(false)
 
   useEffect(() => {
+    const applySettings = (value: AppSettings) => {
+      const nextSettings = normalizeSettings(value)
+      lastPersistedSettings.current = JSON.stringify(nextSettings)
+      setSettings(nextSettings)
+    }
+
+    try {
+      const raw = window.localStorage.getItem(SETTINGS_STORAGE_KEY)
+      if (raw) {
+        applySettings(JSON.parse(raw) as AppSettings)
+        setLoaded(true)
+      }
+    } catch {
+      window.localStorage.removeItem(SETTINGS_STORAGE_KEY)
+    }
+
     fetch("/api/settings")
       .then(async (response) => {
         const data = (await response.json().catch(() => ({}))) as { settings?: AppSettings | null }
         if (!response.ok) throw new Error("api")
         return data.settings
       })
-      .catch(() => {
-        try {
-          const raw = window.localStorage.getItem(SETTINGS_STORAGE_KEY)
-          return raw ? (JSON.parse(raw) as AppSettings) : null
-        } catch {
-          return null
+      .then((serverSettings) => {
+        if (serverSettings && !hasInteracted.current) {
+          applySettings(serverSettings)
+          window.localStorage.setItem(
+            SETTINGS_STORAGE_KEY,
+            JSON.stringify(normalizeSettings(serverSettings)),
+          )
         }
       })
-      .then((parsed) => {
-        const nextSettings = parsed ? normalizeSettings(parsed) : DEFAULT_SETTINGS
-        lastPersistedSettings.current = JSON.stringify(nextSettings)
-        setSettings(nextSettings)
-      })
+      .catch(() => undefined)
       .finally(() => setLoaded(true))
   }, [])
 
@@ -85,6 +99,7 @@ export default function SettingsClient() {
   }
 
   const updateNotification = (key: keyof AppSettings["notifications"], value: boolean) => {
+    hasInteracted.current = true
     setSettings((current) => ({
       ...current,
       notifications: {

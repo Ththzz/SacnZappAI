@@ -39,27 +39,41 @@ export default function HealthGoalEditor({
   const [saving, setSaving] = useState(false)
   const [loaded, setLoaded] = useState(false)
   const lastPersistedSettings = useRef("")
+  const hasInteracted = useRef(false)
 
   useEffect(() => {
+    const applySettings = (value: AppSettings) => {
+      const nextSettings = normalizeSettings(value)
+      lastPersistedSettings.current = JSON.stringify(nextSettings)
+      setSettings(nextSettings)
+    }
+
+    try {
+      const raw = window.localStorage.getItem(SETTINGS_STORAGE_KEY)
+      if (raw) {
+        applySettings(JSON.parse(raw) as AppSettings)
+        setLoaded(true)
+      }
+    } catch {
+      window.localStorage.removeItem(SETTINGS_STORAGE_KEY)
+    }
+
     fetch("/api/settings")
       .then(async (response) => {
         const data = (await response.json().catch(() => ({}))) as { settings?: AppSettings | null }
         if (!response.ok) throw new Error("api")
         return data.settings
       })
-      .catch(() => {
-        try {
-          const raw = window.localStorage.getItem(SETTINGS_STORAGE_KEY)
-          return raw ? JSON.parse(raw) as AppSettings : null
-        } catch {
-          return null
+      .then((serverSettings) => {
+        if (serverSettings && !hasInteracted.current) {
+          applySettings(serverSettings)
+          window.localStorage.setItem(
+            SETTINGS_STORAGE_KEY,
+            JSON.stringify(normalizeSettings(serverSettings)),
+          )
         }
       })
-      .then((storedSettings) => {
-        const nextSettings = storedSettings ? normalizeSettings(storedSettings) : DEFAULT_SETTINGS
-        lastPersistedSettings.current = JSON.stringify(nextSettings)
-        setSettings(nextSettings)
-      })
+      .catch(() => undefined)
       .finally(() => setLoaded(true))
   }, [])
 
@@ -79,6 +93,7 @@ export default function HealthGoalEditor({
     key: K,
     value: AppSettings["healthGoal"][K],
   ) => {
+    hasInteracted.current = true
     setNotice(null)
     setSettings((current) => ({
       ...current,
@@ -87,6 +102,7 @@ export default function HealthGoalEditor({
   }
 
   const cancelChanges = () => {
+    hasInteracted.current = true
     if (lastPersistedSettings.current) {
       setSettings(normalizeSettings(JSON.parse(lastPersistedSettings.current) as AppSettings))
     }
@@ -94,6 +110,7 @@ export default function HealthGoalEditor({
   }
 
   const saveHealthGoal = async () => {
+    hasInteracted.current = true
     const serializedSettings = JSON.stringify(settings)
     setSaving(true)
     setNotice(null)
