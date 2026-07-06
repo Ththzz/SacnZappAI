@@ -6,6 +6,11 @@ export const metadata: Metadata = {
   description: "จัดการโปรไฟล์และเป้าหมายโภชนาการใน ScanZapp AI",
 }
 
-export default function ProfilePage() {
-  return <ProfileClient />
+export default async function ProfilePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ tab?: string }>
+}) {
+  const { tab } = await searchParams
+  return <ProfileClient initialTab={tab === "goals" ? "goals" : "profile"} />
 }

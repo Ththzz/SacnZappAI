@@ -63,11 +63,22 @@ function normalizeGender(value: unknown): Gender {
   return "unspecified"
 }
 
-function mapProfileGoalToMode(selectedGoal?: string | null): GoalMode | null {
+export function mapProfileGoalToMode(selectedGoal?: string | null): GoalMode | null {
   if (selectedGoal === "cut") return "lose"
   if (selectedGoal === "lean") return "gain"
   if (selectedGoal === "maintain") return "maintain"
   return null
+}
+
+export function mapGoalModeToProfileGoal(mode: GoalMode) {
+  if (mode === "lose") return "cut" as const
+  if (mode === "gain") return "lean" as const
+  return "maintain" as const
+}
+
+export function getWeeklyRateLabel(mode: GoalMode) {
+  if (mode === "maintain") return null
+  return `อัตราการ${mode === "lose" ? "ลด" : "เพิ่ม"}น้ำหนัก (kg/สัปดาห์)`
 }
 
 export function calculateBmr(input: { weightKg?: number | null; heightCm?: number | null; age?: number | null; gender?: Gender | string | null }) {

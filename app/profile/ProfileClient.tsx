@@ -1,11 +1,13 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
-import { BadgeCheck, Check, Target } from "lucide-react"
+import { BadgeCheck, Check, Goal, Target, UserRound } from "lucide-react"
 import { STORAGE_KEYS } from "@/lib/user-data"
 import PageDataLoading from "@/components/ui/PageDataLoading"
+import HealthGoalEditor, { type SyncedProfile } from "@/components/profile/HealthGoalEditor"
 
 type GoalKey = "lean" | "maintain" | "cut"
+type ProfileTab = "profile" | "goals"
 
 type ProfileForm = {
   name: string
@@ -58,7 +60,12 @@ function calculateAge(birthDate: string) {
   return age > 0 ? String(age) : ""
 }
 
-export default function ProfileClient() {
+export default function ProfileClient({
+  initialTab = "profile",
+}: {
+  initialTab?: ProfileTab
+}) {
+  const [activeTab, setActiveTab] = useState<ProfileTab>(initialTab)
   const [selectedGoal, setSelectedGoal] = useState<GoalKey>("maintain")
   const [form, setForm] = useState<ProfileForm>(emptyForm)
   const [notice, setNotice] = useState<string | null>(null)
@@ -141,6 +148,27 @@ export default function ProfileClient() {
     setNotice(null)
   }
 
+  const selectTab = (tab: ProfileTab) => {
+    setActiveTab(tab)
+    window.history.replaceState(null, "", tab === "goals" ? "/profile?tab=goals" : "/profile")
+  }
+
+  const applySyncedGoalProfile = (profile: SyncedProfile) => {
+    const nextGoal = goalOptions.some((goal) => goal.key === profile.selectedGoal)
+      ? profile.selectedGoal as GoalKey
+      : selectedGoal
+    const nextForm = { ...form }
+
+    for (const key of Object.keys(emptyForm) as (keyof ProfileForm)[]) {
+      const value = profile.form?.[key]
+      if (typeof value === "string") nextForm[key] = value
+    }
+
+    setSelectedGoal(nextGoal)
+    setForm(nextForm)
+    savedProfile.current = { selectedGoal: nextGoal, form: nextForm }
+  }
+
   const displayName = [form.name, form.lastName].filter(Boolean).join(" ") || "ผู้ใช้งาน"
   const initial = (form.name || form.email || "U").trim().charAt(0).toUpperCase()
   const activeGoal = goalOptions.find((goal) => goal.key === selectedGoal)?.label
@@ -166,7 +194,37 @@ export default function ProfileClient() {
         </div>
       )}
 
-      <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1.08fr)_minmax(320px,.92fr)]">
+      <div className="mb-5 flex w-full max-w-xl rounded-2xl bg-white p-1.5 shadow-sm ring-1 ring-black/5">
+        <button
+          type="button"
+          onClick={() => selectTab("profile")}
+          className={`flex h-11 flex-1 items-center justify-center gap-2 rounded-xl px-4 text-sm font-bold transition-colors ${
+            activeTab === "profile"
+              ? "bg-[#2EC78F] text-white shadow-sm"
+              : "text-neutral-500 hover:bg-neutral-50"
+          }`}
+        >
+          <UserRound className="h-4 w-4" />
+          ข้อมูลโปรไฟล์
+        </button>
+        <button
+          type="button"
+          onClick={() => selectTab("goals")}
+          className={`flex h-11 flex-1 items-center justify-center gap-2 rounded-xl px-4 text-sm font-bold transition-colors ${
+            activeTab === "goals"
+              ? "bg-[#2EC78F] text-white shadow-sm"
+              : "text-neutral-500 hover:bg-neutral-50"
+          }`}
+        >
+          <Goal className="h-4 w-4" />
+          เป้าหมายสุขภาพ
+        </button>
+      </div>
+
+      {activeTab === "goals" ? (
+        <HealthGoalEditor onProfileSynced={applySyncedGoalProfile} />
+      ) : (
+        <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1.08fr)_minmax(320px,.92fr)]">
         <section className="rounded-[22px] border border-neutral-100 bg-white p-5 shadow-[0_5px_22px_rgba(32,50,42,0.07)] sm:p-6">
           <h2 className="text-base font-extrabold">ข้อมูลพื้นฐาน</h2>
 
@@ -314,7 +372,8 @@ export default function ProfileClient() {
             </div>
           </div>
         </section>
-      </div>
+        </div>
+      )}
     </div>
   )
 }

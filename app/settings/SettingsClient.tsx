@@ -1,24 +1,18 @@
 "use client"
 
 import Link from "next/link"
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import {
   Bell,
   ChevronRight,
   Droplets,
-  Flame,
   Goal,
-  HandPlatter,
-  Scale,
   Trash2,
   UserRound,
   Download,
-  CalendarDays,
-  ArrowLeft,
-  Activity,
   ChartColumnIncreasing,
 } from "lucide-react"
-import { DEFAULT_SETTINGS, normalizeSettings, updateHealthGoal, type ActivityLevel, type AppSettings, type GoalMode } from "@/lib/settings"
+import { DEFAULT_SETTINGS, normalizeSettings, type AppSettings } from "@/lib/settings"
 import PageDataLoading from "@/components/ui/PageDataLoading"
 
 const SETTINGS_STORAGE_KEY = "nutriscan.settings.v1"
@@ -33,9 +27,7 @@ const STORAGE_KEYS_TO_CLEAR = [
 export default function SettingsClient() {
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS)
   const [loaded, setLoaded] = useState(false)
-  const [view, setView] = useState<"main" | "health-goal">("main")
   const [notice, setNotice] = useState<string | null>(null)
-  const [saving, setSaving] = useState(false)
   const lastPersistedSettings = useRef("")
 
   useEffect(() => {
@@ -87,44 +79,10 @@ export default function SettingsClient() {
     }
   }, [settings, loaded])
 
-  const saveHealthGoal = async () => {
-    const serializedSettings = JSON.stringify(settings)
-    setSaving(true)
-    setNotice(null)
-    window.localStorage.setItem(SETTINGS_STORAGE_KEY, serializedSettings)
-
-    try {
-      const response = await fetch("/api/settings", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ settings }),
-      })
-      if (!response.ok) throw new Error("save")
-      lastPersistedSettings.current = serializedSettings
-      setNotice("บันทึกการเปลี่ยนแปลงเป้าหมายแล้ว")
-    } catch {
-      setNotice("บันทึกไว้ในอุปกรณ์แล้ว แต่ยังเชื่อมต่อเซิร์ฟเวอร์ไม่ได้")
-    } finally {
-      setSaving(false)
-    }
-  }
-
   const signOut = async () => {
     await fetch("/api/auth/sign-out", { method: "POST" }).catch(() => undefined)
     window.location.replace("/sign-in")
   }
-
-  const recommendation = useMemo(() => {
-    const baseProtein = settings.healthGoal.currentWeightKg * 1.9
-    const protein = Math.round(baseProtein + (settings.healthGoal.mode === "gain" ? 12 : settings.healthGoal.mode === "lose" ? 2 : 0))
-    const fat = Math.round(settings.healthGoal.currentWeightKg * 0.85)
-    const caloriesForCarbs = settings.healthGoal.dailyCalories - protein * 4 - fat * 9
-    const carbs = Math.max(100, Math.round(caloriesForCarbs / 4))
-    const weightDiff = Math.abs(settings.healthGoal.currentWeightKg - settings.healthGoal.targetWeightKg)
-    const weeks = Math.max(1, Math.ceil(weightDiff / Math.max(settings.healthGoal.weeklyDeltaKg, 0.1)))
-
-    return { protein, fat, carbs, weeks }
-  }, [settings])
 
   const updateNotification = (key: keyof AppSettings["notifications"], value: boolean) => {
     setSettings((current) => ({
@@ -134,17 +92,6 @@ export default function SettingsClient() {
         [key]: value,
       },
     }))
-  }
-
-  const updateGoal = <K extends keyof AppSettings["healthGoal"]>(key: K, value: AppSettings["healthGoal"][K]) => {
-    setSettings((current) => ({
-      ...current,
-      healthGoal: updateHealthGoal(current.healthGoal, key, value),
-    }))
-  }
-
-  const applyGoalMode = (mode: GoalMode) => {
-    updateGoal("mode", mode)
   }
 
   const exportData = () => {
@@ -197,20 +144,6 @@ export default function SettingsClient() {
     return <PageDataLoading label="กำลังโหลดการตั้งค่า..." />
   }
 
-  if (view === "health-goal") {
-    return (
-      <HealthGoalView
-        settings={settings}
-        recommendation={recommendation}
-        onBack={() => setView("main")}
-        onUpdateGoal={updateGoal}
-        onApplyGoalMode={applyGoalMode}
-        onSave={saveHealthGoal}
-        saving={saving}
-      />
-    )
-  }
-
   return (
     <div className="mx-auto max-w-6xl space-y-5 text-neutral-900">
       {notice && (
@@ -223,7 +156,7 @@ export default function SettingsClient() {
         <main className="space-y-5">
           <SettingsCard title="บัญชีและโปรไฟล์">
             <SettingsRow icon={UserRound} label="ข้อมูลส่วนตัว" sub="แก้ไขชื่อ อีเมล รหัสผ่าน" action={<Link className="text-neutral-400 hover:text-neutral-700" href="/profile"><ChevronRight className="h-4 w-4" /></Link>} />
-            <SettingsRow icon={Goal} label="เป้าหมายสุขภาพ" sub="BMI, แคลอรี่, เป้าหมายน้ำหนัก" action={<button type="button" onClick={() => setView("health-goal")} className="text-neutral-400 hover:text-neutral-700"><ChevronRight className="h-4 w-4" /></button>} />
+            <SettingsRow icon={Goal} label="เป้าหมายสุขภาพ" sub="BMI, แคลอรี่, เป้าหมายน้ำหนัก" action={<Link aria-label="แก้ไขเป้าหมายสุขภาพ" href="/profile?tab=goals" className="text-neutral-400 hover:text-neutral-700"><ChevronRight className="h-4 w-4" /></Link>} />
           </SettingsCard>
 
           <SettingsCard title="การแจ้งเตือน">
@@ -252,126 +185,6 @@ export default function SettingsClient() {
             ออกจากระบบ
           </button>
           <p className="mt-5 text-[11px] text-neutral-400">ScanZapp AI v1.0 · © 2026</p>
-        </aside>
-      </section>
-    </div>
-  )
-}
-
-function HealthGoalView({
-  settings,
-  recommendation,
-  onBack,
-  onUpdateGoal,
-  onApplyGoalMode,
-  onSave,
-  saving,
-}: {
-  settings: AppSettings
-  recommendation: { protein: number; fat: number; carbs: number; weeks: number }
-  onBack: () => void
-  onUpdateGoal: <K extends keyof AppSettings["healthGoal"]>(key: K, value: AppSettings["healthGoal"][K]) => void
-  onApplyGoalMode: (mode: GoalMode) => void
-  onSave: () => void | Promise<void>
-  saving: boolean
-}) {
-  const modeLabels: Record<GoalMode, string> = {
-    lose: "ลดน้ำหนัก",
-    maintain: "รักษาน้ำหนัก",
-    gain: "เพิ่มน้ำหนัก",
-  }
-
-  return (
-    <div className="mx-auto max-w-6xl space-y-5 text-neutral-900">
-      <header className="space-y-1">
-        <button type="button" onClick={onBack} className="inline-flex items-center gap-2 text-sm font-semibold text-neutral-500 hover:text-neutral-800">
-          <ArrowLeft className="h-4 w-4" />
-          การตั้งค่า
-        </button>
-        <h1 className="text-2xl font-bold tracking-normal">เป้าหมายสุขภาพ</h1>
-        <p className="text-sm text-neutral-500">แก้ไขเป้าหมายโภชนาการและอัตราการเปลี่ยนน้ำหนัก</p>
-      </header>
-
-      <section className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_320px]">
-        <main className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-black/5">
-          <h2 className="text-base font-extrabold">แก้ไขเป้าหมายสุขภาพ</h2>
-
-          <div className="mt-4 grid gap-3 sm:grid-cols-3">
-            {(["lose", "maintain", "gain"] as GoalMode[]).map((mode) => (
-              <button
-                key={mode}
-                type="button"
-                onClick={() => onApplyGoalMode(mode)}
-                className={`rounded-xl border px-3 py-3 text-sm font-bold transition-colors ${
-                  settings.healthGoal.mode === mode
-                    ? "border-[#2EC78F] bg-emerald-50 text-[#2EC78F]"
-                    : "border-neutral-200 bg-white text-neutral-500 hover:bg-neutral-50"
-                }`}
-              >
-                {modeLabels[mode]}
-              </button>
-            ))}
-          </div>
-
-          <div className="mt-5 space-y-4">
-            <label className="space-y-2">
-              <span className="text-sm font-semibold text-neutral-500">อัตราการลดน้ำหนัก (kg/สัปดาห์)</span>
-              <input
-                type="range"
-                min={0.25}
-                max={1}
-                step={0.05}
-                value={settings.healthGoal.weeklyDeltaKg}
-                onChange={(event) => onUpdateGoal("weeklyDeltaKg", Number(event.target.value))}
-                className="w-full accent-[#2EC78F]"
-              />
-              <div className="flex justify-between text-xs font-semibold text-neutral-400">
-                <span>0.25</span>
-                <span className="text-[#2EC78F]">{settings.healthGoal.weeklyDeltaKg.toFixed(2)} kg/สัปดาห์</span>
-                <span>1.00</span>
-              </div>
-            </label>
-
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="น้ำหนักปัจจุบัน (kg)" value={settings.healthGoal.currentWeightKg} onChange={(value) => onUpdateGoal("currentWeightKg", value)} />
-              <Field label="น้ำหนักเป้าหมาย (kg)" value={settings.healthGoal.targetWeightKg} onChange={(value) => onUpdateGoal("targetWeightKg", value)} />
-              <Field label="แคลอรี่เป้าหมายต่อวัน (kcal)" value={settings.healthGoal.dailyCalories} onChange={(value) => onUpdateGoal("dailyCalories", value)} />
-              <label className="space-y-2">
-                <span className="text-sm font-semibold text-neutral-500">ระดับกิจกรรม</span>
-                <select
-                  className="h-11 w-full rounded-xl border border-neutral-200 px-3 text-sm font-semibold outline-none focus:border-[#2EC78F]"
-                  value={settings.healthGoal.activityLevel}
-                  onChange={(event) => onUpdateGoal("activityLevel", event.target.value as ActivityLevel)}
-                >
-                  <option value="low">น้อย</option>
-                  <option value="medium">ปานกลาง</option>
-                  <option value="high">หนัก</option>
-                </select>
-              </label>
-            </div>
-          </div>
-
-          <div className="mt-5 grid gap-3 sm:grid-cols-2">
-            <button type="button" onClick={onSave} disabled={saving} className="inline-flex h-11 items-center justify-center rounded-xl bg-[#2EC78F] text-sm font-bold text-white hover:bg-[#05b474] disabled:cursor-wait disabled:opacity-70">
-              {saving ? "กำลังบันทึก..." : "บันทึกการเปลี่ยนแปลง"}
-            </button>
-            <button type="button" onClick={onBack} className="inline-flex h-11 items-center justify-center rounded-xl border border-neutral-200 text-sm font-bold text-neutral-500 hover:bg-neutral-50">
-              ยกเลิก
-            </button>
-          </div>
-        </main>
-
-        <aside className="space-y-3 rounded-2xl bg-white p-5 shadow-sm ring-1 ring-black/5">
-          <h2 className="text-base font-extrabold">ตัวอย่างแผนที่จะได้รับ</h2>
-          <PlanRow icon={Flame} label="แคลอรี่ต่อวัน" value={`${settings.healthGoal.dailyCalories.toLocaleString()} kcal`} />
-          <PlanRow icon={HandPlatter} label="โปรตีน" value={`${recommendation.protein} g / วัน`} />
-          <PlanRow icon={Activity} label="คาร์โบไฮเดรต" value={`${recommendation.carbs} g / วัน`} />
-          <PlanRow icon={Scale} label="ไขมัน" value={`${recommendation.fat} g / วัน`} />
-          <PlanRow icon={Goal} label="เป้าหมายน้ำหนัก" value={`${settings.healthGoal.targetWeightKg} kg (จาก ${settings.healthGoal.currentWeightKg})`} />
-          <PlanRow icon={CalendarDays} label="ระยะเวลาโดยประมาณ" value={`~${recommendation.weeks} สัปดาห์`} />
-          <div className="rounded-xl bg-emerald-50 p-3 text-xs font-medium text-emerald-700">
-            ระบบจะปรับแผนโภชนาการและสัดส่วนสารอาหารตามค่าที่บันทึกไว้
-          </div>
         </aside>
       </section>
     </div>
@@ -426,32 +239,6 @@ function Toggle({ checked, onChange }: { checked: boolean; onChange: (value: boo
         style={{ transform: checked ? "translateX(24px)" : "translateX(0px)" }}
       />
     </button>
-  )
-}
-
-function PlanRow({ icon: Icon, label, value }: { icon: typeof Bell; label: string; value: string }) {
-  return (
-    <div className="grid grid-cols-[26px_1fr] items-center gap-3 rounded-xl bg-neutral-50 px-3 py-2.5">
-      <Icon className="h-4 w-4 text-neutral-500" />
-      <div>
-        <p className="text-[11px] font-semibold text-neutral-400">{label}</p>
-        <p className="text-sm font-bold text-neutral-900">{value}</p>
-      </div>
-    </div>
-  )
-}
-
-function Field({ label, value, onChange }: { label: string; value: number; onChange: (value: number) => void }) {
-  return (
-    <label className="space-y-2">
-      <span className="text-sm font-semibold text-neutral-500">{label}</span>
-      <input
-        type="number"
-        value={value}
-        onChange={(event) => onChange(Number(event.target.value || 0))}
-        className="h-11 w-full rounded-xl border border-neutral-200 px-3 text-sm font-semibold outline-none focus:border-[#2EC78F]"
-      />
-    </label>
   )
 }
 
