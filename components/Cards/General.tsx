@@ -33,7 +33,7 @@ const EMPTY_DASHBOARD: DashboardData = {
 
 export default function General() {
   const [dashboard, setDashboard] = useState<DashboardData>(EMPTY_DASHBOARD)
-  const [progressReady, setProgressReady] = useState(false)
+  const [animationRatio, setAnimationRatio] = useState(0)
   const { meals, waterLogs, calorieGoal } = dashboard
 
   useEffect(() => {
@@ -49,8 +49,19 @@ export default function General() {
     setDashboard(immediateData)
 
     const controller = new AbortController()
-    let firstFrame = 0
-    let secondFrame = 0
+    let animationFrame = 0
+    const startAnimation = () => {
+      setAnimationRatio(0)
+      animationFrame = window.requestAnimationFrame((startedAt) => {
+        const step = (now: number) => {
+          const progress = Math.min((now - startedAt) / 850, 1)
+          const easedProgress = 1 - Math.pow(1 - progress, 3)
+          setAnimationRatio(easedProgress)
+          if (progress < 1) animationFrame = window.requestAnimationFrame(step)
+        }
+        animationFrame = window.requestAnimationFrame(step)
+      })
+    }
 
     fetch("/api/dashboard", { signal: controller.signal })
       .then(async (response) => {
@@ -59,36 +70,29 @@ export default function General() {
         return data
       })
       .then((serverData) => {
-      if (controller.signal.aborted) return
+        if (controller.signal.aborted) return
 
-      const nextData: DashboardData = {
-        meals: Array.isArray(serverData.meals) ? serverData.meals : immediateData.meals,
-        waterLogs: Array.isArray(serverData.waterLogs) ? serverData.waterLogs : immediateData.waterLogs,
-        calorieGoal: typeof serverData.calorieGoal === "number"
-          ? serverData.calorieGoal
-          : immediateData.calorieGoal,
-      }
-      setDashboard(nextData)
-      window.localStorage.setItem(DASHBOARD_CACHE_KEY, JSON.stringify(nextData))
-      writeMealEntries(nextData.meals)
-      writeWaterLogs(nextData.waterLogs)
-
-      setProgressReady(false)
-      firstFrame = window.requestAnimationFrame(() => {
-        secondFrame = window.requestAnimationFrame(() => setProgressReady(true))
-      })
+        const nextData: DashboardData = {
+          meals: Array.isArray(serverData.meals) ? serverData.meals : immediateData.meals,
+          waterLogs: Array.isArray(serverData.waterLogs) ? serverData.waterLogs : immediateData.waterLogs,
+          calorieGoal: typeof serverData.calorieGoal === "number"
+            ? serverData.calorieGoal
+            : immediateData.calorieGoal,
+        }
+        setDashboard(nextData)
+        window.localStorage.setItem(DASHBOARD_CACHE_KEY, JSON.stringify(nextData))
+        writeMealEntries(nextData.meals)
+        writeWaterLogs(nextData.waterLogs)
+        startAnimation()
       })
       .catch(() => {
         if (controller.signal.aborted) return
-        firstFrame = window.requestAnimationFrame(() => {
-          secondFrame = window.requestAnimationFrame(() => setProgressReady(true))
-        })
+        startAnimation()
       })
 
     return () => {
       controller.abort()
-      window.cancelAnimationFrame(firstFrame)
-      window.cancelAnimationFrame(secondFrame)
+      window.cancelAnimationFrame(animationFrame)
     }
   }, [])
 
@@ -103,32 +107,37 @@ export default function General() {
     .reduce((sum, item) => sum + item.amount, 0)
   const waterCups = Math.round(waterTotalMl / 250)
   const calorieProgress = calorieGoal ? Math.min((caloriesConsumed / calorieGoal) * 100, 100) : 0
-  const caloriesLeft = calorieGoal ? calorieGoal - caloriesConsumed : null
-  const progressWidth = progressReady ? `${calorieProgress}%` : "0%"
+  const animatedCalories = Math.round(caloriesConsumed * animationRatio)
+  const animatedCalorieGoal = Math.round((calorieGoal ?? 0) * animationRatio)
+  const animatedCaloriesLeft = animatedCalorieGoal - animatedCalories
+  const animationComplete = animationRatio >= 1
+  const progressWidth = `${calorieProgress * animationRatio}%`
 
   const nutrientSummary = [
-    { label: "โปรตีน", value: `${Math.round(protein)}g` },
-    { label: "ไขมัน", value: `${Math.round(fat)}g` },
-    { label: "คาร์บ", value: `${Math.round(carbs)}g` },
+    { label: "โปรตีน", value: `${Math.round(protein * animationRatio)}g` },
+    { label: "ไขมัน", value: `${Math.round(fat * animationRatio)}g` },
+    { label: "คาร์บ", value: `${Math.round(carbs * animationRatio)}g` },
   ]
 
   const statCards = [
     {
       icon: <Droplets className="h-3.5 w-3.5 text-sky-500" />,
       label: "น้ำวันนี้",
-      value: `${waterCups} แก้ว`,
+      value: `${Math.round(waterCups * animationRatio)} แก้ว`,
       accent: "text-sky-500",
     },
     {
       icon: <Utensils className="h-3.5 w-3.5 text-orange-500" />,
       label: "มื้อวันนี้",
-      value: `${todayMeals.length} มื้อ`,
+      value: `${Math.round(todayMeals.length * animationRatio)} มื้อ`,
       accent: "text-orange-500",
     },
     {
       icon: <Target className="h-3.5 w-3.5 text-emerald-500" />,
       label: "เป้าหมาย",
-      value: calorieGoal ? `${Math.round(calorieProgress)}%` : "ยังไม่มี",
+      value: calorieGoal
+        ? `${Math.round(calorieProgress * animationRatio)}%`
+        : animationComplete ? "ยังไม่มี" : "0%",
       accent: "text-emerald-500",
     },
   ]
@@ -170,9 +179,11 @@ export default function General() {
               <p className="text-xs font-normal text-white/80">แคลอรี่วันนี้</p>
               <div className="flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center sm:gap-4">
                 <div className="flex items-end gap-1.5">
-                  <span className="text-[2.6rem] font-bold leading-none sm:text-[3rem]">{caloriesConsumed.toLocaleString()}</span>
+                  <span className="text-[2.6rem] font-bold leading-none sm:text-[3rem]">{animatedCalories.toLocaleString()}</span>
                   <span className="pb-1 text-[0.95rem] font-normal leading-none sm:text-[1.1rem]">
-                    {calorieGoal ? `/ ${calorieGoal.toLocaleString()} kcal` : "kcal"}
+                    {!animationComplete || calorieGoal
+                      ? `/ ${animatedCalorieGoal.toLocaleString()} kcal`
+                      : "kcal"}
                   </span>
                 </div>
 
@@ -192,16 +203,18 @@ export default function General() {
             <div className="space-y-1.5">
               <div className="h-1.5 overflow-hidden rounded-full bg-white/22">
                 <div
-                  className="h-full rounded-full bg-white transition-[width] duration-700 ease-out"
+                  className="h-full rounded-full bg-white will-change-[width]"
                   style={{ width: progressWidth }}
                 />
               </div>
               <p className="text-[11px] font-medium text-white/90">
-                {caloriesLeft === null
+                {!animationComplete
+                  ? `กำลังโหลด ${animatedCalories.toLocaleString()} / ${animatedCalorieGoal.toLocaleString()} kcal`
+                  : calorieGoal === null
                   ? "ตั้งค่าเป้าหมายแคลอรี่ในหน้าการตั้งค่า"
-                  : caloriesLeft >= 0
-                    ? `เหลืออีก ${caloriesLeft.toLocaleString()} kcal`
-                    : `เกินเป้า ${Math.abs(caloriesLeft).toLocaleString()} kcal`}
+                  : animatedCaloriesLeft >= 0
+                    ? `เหลืออีก ${animatedCaloriesLeft.toLocaleString()} kcal`
+                    : `เกินเป้า ${Math.abs(animatedCaloriesLeft).toLocaleString()} kcal`}
               </p>
             </div>
           </CardContent>
