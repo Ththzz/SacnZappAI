@@ -20,7 +20,6 @@ import {
   type GoalMode,
 } from "@/lib/settings"
 import { STORAGE_KEYS } from "@/lib/user-data"
-import PageDataLoading from "@/components/ui/PageDataLoading"
 
 const SETTINGS_STORAGE_KEY = "nutriscan.settings.v1"
 
@@ -149,10 +148,6 @@ export default function HealthGoalEditor({
     }
   }
 
-  if (!loaded) {
-    return <PageDataLoading label="กำลังโหลดเป้าหมายสุขภาพ..." />
-  }
-
   const weeklyRateLabel = getWeeklyRateLabel(settings.healthGoal.mode)
   const modeLabels: Record<GoalMode, string> = {
     lose: "ลดน้ำหนัก",
@@ -161,7 +156,7 @@ export default function HealthGoalEditor({
   }
 
   return (
-    <div className="space-y-5 text-neutral-900">
+    <div className="space-y-5 text-neutral-900" aria-busy={!loaded}>
       {notice && (
         <div
           role="status"

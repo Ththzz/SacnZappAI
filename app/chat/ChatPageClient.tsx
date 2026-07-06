@@ -218,6 +218,7 @@ export default function ChatPageClient() {
   const imageInputRef = useRef<HTMLInputElement>(null)
   const streamFrameRef = useRef<number | null>(null)
   const pendingStreamTextRef = useRef<{ assistantId: string; tempAssistantId: string; text: string } | null>(null)
+  const initialConversationLoadRef = useRef(true)
 
   const hasChatConsent = consents.some((item) => item.scope === "ai_chat_basic")
 
@@ -260,7 +261,7 @@ export default function ChatPageClient() {
 
   useEffect(() => {
     setIsReady(true)
-    void loadConsent()
+    void loadChatBootstrap()
     return () => {
       streamRef.current?.controller.abort()
       listAbortRef.current?.abort()
@@ -275,6 +276,7 @@ export default function ChatPageClient() {
   }, [])
 
   useEffect(() => {
+    if (initialConversationLoadRef.current && !query) return
     const timeout = window.setTimeout(() => {
       void loadConversations(query)
     }, query ? 180 : 0)
@@ -283,14 +285,19 @@ export default function ChatPageClient() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query])
 
-  async function loadConsent() {
+  async function loadChatBootstrap() {
     setConsentLoading(true)
-    const response = await fetch("/api/chat/consent")
+    setConversationsLoading(true)
+    const response = await fetch("/api/chat/bootstrap")
     const data = (await response.json().catch(() => ({}))) as {
-      items?: ConsentItem[]
+      consents?: ConsentItem[]
+      conversations?: ConversationSummary[]
+      initialConversation?: ConversationDetail | null
       user?: { name?: string }
     }
     setConsentLoading(false)
+    setConversationsLoading(false)
+    initialConversationLoadRef.current = false
 
     if (!response.ok) {
       if (response.status === 401) {
@@ -302,7 +309,13 @@ export default function ChatPageClient() {
     }
 
     if (data.user?.name) setUserName(data.user.name)
-    setConsents(data.items ?? [])
+    setConsents(data.consents ?? [])
+    const items = data.conversations ?? []
+    setConversations(items)
+    if (items[0] && data.initialConversation?.conversation.id === items[0].id) {
+      setCurrentConversation(items[0])
+      setMessages(data.initialConversation.messages ?? [])
+    }
   }
 
   async function persistConsentScopes(updates: Array<{ scope: string; granted: boolean }>) {

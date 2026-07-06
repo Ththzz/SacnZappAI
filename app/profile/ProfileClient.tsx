@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { BadgeCheck, Check, Goal, Target, UserRound } from "lucide-react"
 import { STORAGE_KEYS } from "@/lib/user-data"
-import PageDataLoading from "@/components/ui/PageDataLoading"
 import HealthGoalEditor, { type SyncedProfile } from "@/components/profile/HealthGoalEditor"
 
 type GoalKey = "lean" | "maintain" | "cut"
@@ -192,12 +191,8 @@ export default function ProfileClient({
       ? Math.abs(currentWeight - targetWeight)
       : 0
 
-  if (!loaded && activeTab === "profile") {
-    return <PageDataLoading label="กำลังโหลดข้อมูลโปรไฟล์..." />
-  }
-
   return (
-    <div className="mx-auto max-w-[1180px] text-[#202421]">
+    <div className="mx-auto max-w-[1180px] text-[#202421]" aria-busy={activeTab === "profile" && !loaded}>
       {notice && (
         <div
           role="status"

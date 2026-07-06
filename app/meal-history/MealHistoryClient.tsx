@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   AlertTriangle,
   ArrowLeft,
@@ -33,7 +33,6 @@ import {
   type MealEntry,
   writeMealEntries,
 } from "@/lib/user-data"
-import PageDataLoading from "@/components/ui/PageDataLoading"
 
 type ViewMode = "day" | "week" | "month"
 type DayMeal = {
@@ -218,9 +217,11 @@ export default function MealHistoryClient() {
   const [targets, setTargets] = useState<NutritionTargets | null>(initialCache?.targets ?? null)
   const [historyError, setHistoryError] = useState<string | null>(null)
   const [historyLoaded, setHistoryLoaded] = useState(Boolean(initialCache))
+  const dataRevision = useRef(0)
   const todayKey = getLocalDateKey()
 
   const loadHistoryData = useCallback(async () => {
+    const requestRevision = dataRevision.current
     const now = new Date()
     const weekStart = new Date(now)
     weekStart.setDate(now.getDate() - 6)
@@ -243,28 +244,27 @@ export default function MealHistoryClient() {
       mealCategory: resolveMealCategory(item),
     }))
 
-    const [mealResult, settingsResult] = await Promise.allSettled([
-      fetch(`/api/meals?from=${rangeStart}&to=${getLocalDateKey(now)}&limit=500`).then(async (response) => {
-        const data = (await response.json().catch(() => ({}))) as { meals?: ReturnType<typeof readMealEntries> }
-        if (!response.ok) throw new Error("api")
-        return data.meals ?? []
-      }),
-      fetch("/api/settings").then(async (response) => {
-        const data = (await response.json().catch(() => ({}))) as AppSettingsPayload
-        if (!response.ok) throw new Error("settings")
-        return data
-      }),
-    ])
+    try {
+      const response = await fetch(
+        `/api/meal-history-data?from=${rangeStart}&to=${getLocalDateKey(now)}`,
+      )
+      const data = await response.json().catch(() => ({})) as AppSettingsPayload & {
+        meals?: ReturnType<typeof readMealEntries>
+      }
+      if (!response.ok) throw new Error("api")
+      const meals = data.meals ?? []
 
-    if (mealResult.status === "fulfilled") {
-      writeMealEntries(mealResult.value)
-      setHistoryMeals(convertMeals(mealResult.value))
+      if (dataRevision.current === requestRevision) {
+        writeMealEntries(meals)
+        setHistoryMeals(convertMeals(meals))
+      }
+      setTargets(deriveTargets(data))
+      setHistoryError(null)
+    } catch {
+      setHistoryError("โหลดมื้ออาหารจากเซิร์ฟเวอร์ไม่สำเร็จ กรุณาลองรีเฟรชอีกครั้ง")
+    } finally {
+      setHistoryLoaded(true)
     }
-    if (settingsResult.status === "fulfilled") {
-      setTargets(deriveTargets(settingsResult.value))
-    }
-    setHistoryError(mealResult.status === "fulfilled" ? null : "โหลดมื้ออาหารจากเซิร์ฟเวอร์ไม่สำเร็จ กรุณาลองรีเฟรชอีกครั้ง")
-    setHistoryLoaded(true)
   }, [])
 
   useEffect(() => {
@@ -313,6 +313,7 @@ export default function MealHistoryClient() {
   const averageCalories = daysWithMeals > 0 ? Math.round(weeklyCalories / daysWithMeals) : 0
 
   const handleDeleteMeal = async (mealId: string) => {
+    dataRevision.current += 1
     const previousMeals = historyMeals
     setHistoryMeals((current) => current.filter((meal) => meal.id !== mealId))
     if (selectedMeal?.id === mealId) setSelectedMeal(null)
@@ -337,6 +338,7 @@ export default function MealHistoryClient() {
   }
 
   const handleUpdateMeal = async (updatedMeal: DayMeal) => {
+    dataRevision.current += 1
     const previousMeals = historyMeals
     const previousSelectedMeal = selectedMeal
     setHistoryMeals((current) => current.map((meal) => (meal.id === updatedMeal.id ? updatedMeal : meal)))
@@ -379,6 +381,7 @@ export default function MealHistoryClient() {
   }
 
   const handleAddManualMeal = async (meal: DayMeal) => {
+    dataRevision.current += 1
     const previousMeals = historyMeals
     setHistoryMeals((current) => [meal, ...current])
     setHistoryError(null)
@@ -415,12 +418,8 @@ export default function MealHistoryClient() {
     }
   }
 
-  if (!historyLoaded) {
-    return <PageDataLoading label="กำลังโหลดประวัติมื้ออาหาร..." />
-  }
-
   return (
-    <div className="mx-auto max-w-7xl space-y-5 text-neutral-900">
+    <div className="mx-auto max-w-7xl space-y-5 text-neutral-900" aria-busy={!historyLoaded}>
       {historyError && (
         <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
           {historyError}

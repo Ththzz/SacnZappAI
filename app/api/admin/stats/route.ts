@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 import { requireAdmin } from "@/lib/auth"
-import { prisma } from "@/lib/db"
+import { getAdminStats } from "@/lib/admin-stats"
 import { jsonError } from "@/lib/http"
 
 const todayKey = () => {
@@ -16,36 +16,9 @@ export async function GET() {
     await requireAdmin()
     const today = todayKey()
     const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
-    const [users, admins, meals, mealsToday, waterToday, scans, scanErrors, activeMealUsers, activeWaterUsers, activeScanUsers] = await Promise.all([
-      prisma.user.count(),
-      prisma.user.count({ where: { role: "admin" } }),
-      prisma.meal.count(),
-      prisma.meal.count({ where: { date: today } }),
-      prisma.waterLog.aggregate({ where: { date: today }, _sum: { amount: true } }),
-      prisma.scanResult.count(),
-      prisma.scanResult.count({ where: { status: "error" } }),
-      prisma.meal.findMany({ where: { createdAt: { gte: since } }, select: { userId: true }, distinct: ["userId"] }),
-      prisma.waterLog.findMany({ where: { createdAt: { gte: since } }, select: { userId: true }, distinct: ["userId"] }),
-      prisma.scanResult.findMany({ where: { createdAt: { gte: since }, userId: { not: null } }, select: { userId: true }, distinct: ["userId"] }),
-    ])
-    const activeUsers7d = new Set([
-      ...activeMealUsers.map((item) => item.userId),
-      ...activeWaterUsers.map((item) => item.userId),
-      ...activeScanUsers.flatMap((item) => (item.userId ? [item.userId] : [])),
-    ]).size
+    const stats = await getAdminStats(today, since)
 
-    return NextResponse.json({
-      stats: {
-        users,
-        admins,
-        meals,
-        mealsToday,
-        waterTodayMl: waterToday._sum.amount ?? 0,
-        scans,
-        scanErrors,
-        activeUsers7d,
-      },
-    })
+    return NextResponse.json({ stats })
   } catch (error) {
     return jsonError(error)
   }

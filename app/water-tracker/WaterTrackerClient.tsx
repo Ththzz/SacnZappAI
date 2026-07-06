@@ -1,8 +1,7 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
-import PageDataLoading from '@/components/ui/PageDataLoading'
 import { CheckCircle2, Droplet, Droplets, Minus, Plus, Target, Trash2, Waves } from 'lucide-react'
 import { getLocalDateKey, readWaterLogs, writeWaterLogs, type WaterLogEntry } from '@/lib/user-data'
 
@@ -37,6 +36,7 @@ export default function WaterTrackerClient() {
   const [selectedAmount, setSelectedAmount] = useState(250)
   const [loaded, setLoaded] = useState(false)
   const [targetMl] = useState<number | null>(null)
+  const dataRevision = useRef(0)
   const todayKey = getLocalDateKey()
   const todayLabel = new Intl.DateTimeFormat('th-TH', { day: 'numeric', month: 'long', year: 'numeric' }).format(new Date())
 
@@ -45,12 +45,14 @@ export default function WaterTrackerClient() {
     weekStart.setDate(weekStart.getDate() - 6)
     const stored = readWaterLogs()
     if (stored.length > 0) setLogs(stored)
+    setLoaded(true)
+    const requestRevision = dataRevision.current
 
     fetch(`/api/water-logs?from=${getLocalDateKey(weekStart)}&to=${getLocalDateKey()}&limit=500`)
       .then(async (response) => {
         const data = (await response.json().catch(() => ({}))) as { logs?: WaterLogEntry[] }
         if (!response.ok) throw new Error('api')
-        setLogs(data.logs ?? [])
+        if (dataRevision.current === requestRevision) setLogs(data.logs ?? [])
       })
       .catch(() => {
         const stored = readWaterLogs()
@@ -78,6 +80,7 @@ export default function WaterTrackerClient() {
   const targetLineBottom = targetCups ? (targetCups / chartMaxCups) * chartHeight : null
 
   const handleAddWater = () => {
+    dataRevision.current += 1
     const nextTime = new Date().toLocaleTimeString('th-TH', {
       hour: '2-digit',
       minute: '2-digit',
@@ -104,6 +107,7 @@ export default function WaterTrackerClient() {
   }
 
   const handleSubtractWater = () => {
+    dataRevision.current += 1
     const removedIds: string[] = []
     const changedEntries: WaterLogEntry[] = []
 
@@ -147,6 +151,7 @@ export default function WaterTrackerClient() {
   }
 
   const handleRemoveLog = (indexToRemove: number) => {
+    dataRevision.current += 1
     const entryToRemove = todayLogs[indexToRemove]
     setLogs((current) => {
       let todayIndex = -1
@@ -164,12 +169,8 @@ export default function WaterTrackerClient() {
     }
   }
 
-  if (!loaded && logs.length === 0) {
-    return <PageDataLoading label="กำลังโหลดข้อมูลการดื่มน้ำ..." />
-  }
-
   return (
-    <div className="mx-auto max-w-6xl space-y-5 text-neutral-900">
+    <div className="mx-auto max-w-6xl space-y-5 text-neutral-900" aria-busy={!loaded}>
       <div className="flex justify-end">
         <div className="inline-flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-600">
           <Droplets className="h-4 w-4" />

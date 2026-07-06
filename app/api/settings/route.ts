@@ -17,13 +17,6 @@ export async function GET() {
       : null
     const settings = normalizeSettings(parsed, profile)
 
-    if (row && row.settingsJson !== JSON.stringify(settings)) {
-      await prisma.userSettings.update({
-        where: { userId: user.id },
-        data: { settingsJson: JSON.stringify(settings) },
-      })
-    }
-
     return NextResponse.json({ settings })
   } catch (error) {
     return jsonError(error)

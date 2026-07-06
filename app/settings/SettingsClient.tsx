@@ -13,7 +13,6 @@ import {
   ChartColumnIncreasing,
 } from "lucide-react"
 import { DEFAULT_SETTINGS, normalizeSettings, type AppSettings } from "@/lib/settings"
-import PageDataLoading from "@/components/ui/PageDataLoading"
 
 const SETTINGS_STORAGE_KEY = "nutriscan.settings.v1"
 const STORAGE_KEYS_TO_CLEAR = [
@@ -155,12 +154,8 @@ export default function SettingsClient() {
     setNotice("ล้างประวัติเรียบร้อยแล้ว")
   }
 
-  if (!loaded) {
-    return <PageDataLoading label="กำลังโหลดการตั้งค่า..." />
-  }
-
   return (
-    <div className="mx-auto max-w-6xl space-y-5 text-neutral-900">
+    <div className="mx-auto max-w-6xl space-y-5 text-neutral-900" aria-busy={!loaded}>
       {notice && (
         <div className="rounded-2xl bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-700">
           {notice}

@@ -52,43 +52,38 @@ export default function General() {
     let firstFrame = 0
     let secondFrame = 0
 
-    Promise.allSettled([
-      fetch("/api/meals?limit=100", { signal: controller.signal }).then(async (response) => {
-        const data = await response.json() as { meals?: MealEntry[] }
-        if (!response.ok) throw new Error("meals")
-        return Array.isArray(data.meals) ? data.meals : []
-      }),
-      fetch("/api/water-logs?limit=100", { signal: controller.signal }).then(async (response) => {
-        const data = await response.json() as { logs?: WaterLogEntry[] }
-        if (!response.ok) throw new Error("water")
-        return Array.isArray(data.logs) ? data.logs : []
-      }),
-      fetch("/api/settings", { signal: controller.signal }).then(async (response) => {
-        const data = await response.json() as { settings?: { healthGoal?: { dailyCalories?: number } } }
-        if (!response.ok) throw new Error("settings")
-        const value = Number(data.settings?.healthGoal?.dailyCalories)
-        return Number.isFinite(value) && value > 0 ? Math.round(value) : null
-      }),
-    ]).then(([mealResult, waterResult, settingsResult]) => {
+    fetch("/api/dashboard", { signal: controller.signal })
+      .then(async (response) => {
+        const data = await response.json() as Partial<DashboardData>
+        if (!response.ok) throw new Error("dashboard")
+        return data
+      })
+      .then((serverData) => {
       if (controller.signal.aborted) return
 
       const nextData: DashboardData = {
-        meals: mealResult.status === "fulfilled" ? mealResult.value : immediateData.meals,
-        waterLogs: waterResult.status === "fulfilled" ? waterResult.value : immediateData.waterLogs,
-        calorieGoal: settingsResult.status === "fulfilled"
-          ? settingsResult.value
+        meals: Array.isArray(serverData.meals) ? serverData.meals : immediateData.meals,
+        waterLogs: Array.isArray(serverData.waterLogs) ? serverData.waterLogs : immediateData.waterLogs,
+        calorieGoal: typeof serverData.calorieGoal === "number"
+          ? serverData.calorieGoal
           : immediateData.calorieGoal,
       }
       setDashboard(nextData)
       window.localStorage.setItem(DASHBOARD_CACHE_KEY, JSON.stringify(nextData))
-      if (mealResult.status === "fulfilled") writeMealEntries(mealResult.value)
-      if (waterResult.status === "fulfilled") writeWaterLogs(waterResult.value)
+      writeMealEntries(nextData.meals)
+      writeWaterLogs(nextData.waterLogs)
 
       setProgressReady(false)
       firstFrame = window.requestAnimationFrame(() => {
         secondFrame = window.requestAnimationFrame(() => setProgressReady(true))
       })
-    })
+      })
+      .catch(() => {
+        if (controller.signal.aborted) return
+        firstFrame = window.requestAnimationFrame(() => {
+          secondFrame = window.requestAnimationFrame(() => setProgressReady(true))
+        })
+      })
 
     return () => {
       controller.abort()

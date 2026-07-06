@@ -81,6 +81,12 @@ type SettingsPayload = {
   } | null
 }
 
+type HealthInsightData = SettingsPayload & {
+  meals?: MealEntry[]
+  waterLogs?: ReturnType<typeof readWaterLogs>
+  savedSuggestions?: SavedMealSuggestion[]
+}
+
 type InsightCachePayload = {
   mealCount: number
   calorieGoal: number | null
@@ -162,6 +168,8 @@ export default function HealthInsightClient() {
   const [calorieGoal, setCalorieGoal] = useState<number | null>(initialInsightCache?.calorieGoal ?? null)
   const [convertingMeal, setConvertingMeal] = useState<SavedMealSuggestion | null>(null)
   const initialLoadStarted = useRef(false)
+  const hasInsightData = useRef(Boolean(initialInsightCache))
+  const hasSuggestionData = useRef(Boolean(initialSuggestionCache))
 
   const applySuggestionPayload = useCallback((payload: SuggestionPayload) => {
     setMealSuggestions(payload.suggestions ?? [])
@@ -180,7 +188,7 @@ export default function HealthInsightClient() {
 
   const loadSuggestionData = useCallback(async (force = false) => {
     if (force) setRefreshing(true)
-    else setSuggestionLoading(true)
+    else if (!hasSuggestionData.current) setSuggestionLoading(true)
     setSuggestionError(null)
 
     try {
@@ -189,6 +197,7 @@ export default function HealthInsightClient() {
       if (!response.ok) throw new Error(parseApiError(payload, "โหลดคำแนะนำไม่สำเร็จ"))
 
       applySuggestionPayload(payload)
+      hasSuggestionData.current = true
       setSuggestionLoading(false)
 
       if (payload.refreshing) {
@@ -218,38 +227,26 @@ export default function HealthInsightClient() {
   }, [applySuggestionPayload])
 
   const loadInsightData = useCallback(async () => {
-    setLoading(true)
+    if (!hasInsightData.current) setLoading(true)
     setPageError(null)
     const dateKeys = getSevenDayDateKeys()
     const dateRange = `from=${dateKeys[0]}&to=${dateKeys[6]}&limit=500`
 
-    const [mealResult, waterResult, settingsResult, savedResult] = await Promise.allSettled([
-      fetch(`/api/meals?${dateRange}`).then(async (response) => {
-        const data = (await response.json().catch(() => ({}))) as { meals?: MealEntry[] }
-        if (!response.ok) throw new Error(parseApiError(data, "โหลดมื้ออาหารไม่สำเร็จ"))
-        return data.meals ?? []
-      }),
-      fetch(`/api/water-logs?${dateRange}`).then(async (response) => {
-        const data = (await response.json().catch(() => ({}))) as { logs?: ReturnType<typeof readWaterLogs> }
-        if (!response.ok) throw new Error(parseApiError(data, "โหลดข้อมูลน้ำไม่สำเร็จ"))
-        return data.logs ?? []
-      }),
-      fetch("/api/settings").then(async (response) => {
-        const data = (await response.json().catch(() => ({}))) as SettingsPayload
-        if (!response.ok) throw new Error(parseApiError(data, "โหลดเป้าหมายไม่สำเร็จ"))
-        return getCalorieGoal(data)
-      }),
-      fetch("/api/saved-meal-suggestions").then(async (response) => {
-        const data = (await response.json().catch(() => ({}))) as { suggestions?: SavedMealSuggestion[] }
-        if (!response.ok) throw new Error(parseApiError(data, "โหลดเมนูที่บันทึกไว้ไม่สำเร็จ"))
-        return data.suggestions ?? []
-      }),
-    ])
+    let serverData: HealthInsightData | null = null
 
-    const allMeals = mealResult.status === "fulfilled" ? mealResult.value : readMealEntries()
+    try {
+      const response = await fetch(`/api/health-insight-data?${dateRange}`)
+      const data = await response.json().catch(() => ({})) as HealthInsightData
+      if (!response.ok) throw new Error(parseApiError(data, "โหลดข้อมูลวิเคราะห์ไม่สำเร็จ"))
+      serverData = data
+    } catch (error) {
+      setPageError(error instanceof Error ? error.message : "โหลดข้อมูลวิเคราะห์ไม่สำเร็จ")
+    }
+
+    const allMeals = serverData?.meals ?? readMealEntries()
     const recentMeals = allMeals.filter((meal) => meal.date >= dateKeys[0] && meal.date <= dateKeys[6])
-    const waterLogs = waterResult.status === "fulfilled" ? waterResult.value : readWaterLogs()
-    const goal = settingsResult.status === "fulfilled" ? settingsResult.value : null
+    const waterLogs = serverData?.waterLogs ?? readWaterLogs()
+    const goal = serverData ? getCalorieGoal(serverData) : calorieGoal
     const todayWaterMl = waterLogs
       .filter((log) => log.date === dateKeys[6])
       .reduce((sum, log) => sum + log.amount, 0)
@@ -261,14 +258,9 @@ export default function HealthInsightClient() {
     setCalorieTrend(nextCalorieTrend)
     setMacroBalance(nextMacroBalance)
 
-    const nextSavedSuggestions = savedResult.status === "fulfilled" ? savedResult.value : savedSuggestions
-    if (savedResult.status === "fulfilled") {
-      setSavedSuggestions(savedResult.value)
-    }
-
-    const criticalError = [mealResult, waterResult, settingsResult, savedResult].find((result) => result.status === "rejected")
-    if (criticalError?.status === "rejected") {
-      setPageError(criticalError.reason instanceof Error ? criticalError.reason.message : "โหลดข้อมูลวิเคราะห์ไม่สำเร็จ")
+    const nextSavedSuggestions = serverData?.savedSuggestions ?? savedSuggestions
+    if (serverData?.savedSuggestions) {
+      setSavedSuggestions(serverData.savedSuggestions)
     }
 
     const alerts: FoodAlert[] = []
@@ -301,8 +293,9 @@ export default function HealthInsightClient() {
       macroBalance: nextMacroBalance,
       savedSuggestions: nextSavedSuggestions,
     })
+    hasInsightData.current = true
     setLoading(false)
-  }, [savedSuggestions])
+  }, [calorieGoal, savedSuggestions])
 
   useEffect(() => {
     if (initialLoadStarted.current) return

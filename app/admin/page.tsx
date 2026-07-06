@@ -2,6 +2,7 @@ import { redirect } from "next/navigation"
 import { Activity, BarChart3, Droplets, LayoutDashboard, ScanLine, ShieldCheck, Utensils, UsersRound } from "lucide-react"
 
 import { getCurrentUser } from "@/lib/auth"
+import { getAdminStats } from "@/lib/admin-stats"
 import { prisma } from "@/lib/db"
 import { AdminSignOutButton, AdminUsersTable, type AdminUser } from "./AdminDashboardClient"
 
@@ -17,39 +18,25 @@ export default async function AdminPage() {
 
   const today = getTodayKey()
   const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
-  const [userRows, users, admins, meals, mealsToday, waterToday, scans, scanErrors, activeMealUsers, activeWaterUsers, activeScanUsers] = await Promise.all([
+  const [userRows, adminStats] = await Promise.all([
     prisma.user.findMany({
       select: { id: true, name: true, email: true, role: true, createdAt: true },
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: 51,
     }),
-    prisma.user.count(),
-    prisma.user.count({ where: { role: "admin" } }),
-    prisma.meal.count(),
-    prisma.meal.count({ where: { date: today } }),
-    prisma.waterLog.aggregate({ where: { date: today }, _sum: { amount: true } }),
-    prisma.scanResult.count(),
-    prisma.scanResult.count({ where: { status: "error" } }),
-    prisma.meal.findMany({ where: { createdAt: { gte: since } }, select: { userId: true }, distinct: ["userId"] }),
-    prisma.waterLog.findMany({ where: { createdAt: { gte: since } }, select: { userId: true }, distinct: ["userId"] }),
-    prisma.scanResult.findMany({ where: { createdAt: { gte: since }, userId: { not: null } }, select: { userId: true }, distinct: ["userId"] }),
+    getAdminStats(today, since),
   ])
   const hasMoreUsers = userRows.length > 50
   const firstUsers = (hasMoreUsers ? userRows.slice(0, 50) : userRows).map((item) => ({
     ...item,
     createdAt: item.createdAt.toISOString(),
   })) satisfies AdminUser[]
-  const activeUsers7d = new Set([
-    ...activeMealUsers.map((item) => item.userId),
-    ...activeWaterUsers.map((item) => item.userId),
-    ...activeScanUsers.flatMap((item) => (item.userId ? [item.userId] : [])),
-  ]).size
   const stats = [
-    { label: "ผู้ใช้ทั้งหมด", value: users.toLocaleString(), helper: `${admins} แอดมิน`, icon: UsersRound, tone: "bg-emerald-50 text-emerald-600" },
-    { label: "Active 7 วัน", value: activeUsers7d.toLocaleString(), helper: "จาก meal/water/scan", icon: Activity, tone: "bg-sky-50 text-sky-600" },
-    { label: "มื้ออาหาร", value: meals.toLocaleString(), helper: `วันนี้ ${mealsToday} รายการ`, icon: Utensils, tone: "bg-amber-50 text-amber-600" },
-    { label: "น้ำวันนี้", value: `${Math.round(waterToday._sum.amount ?? 0).toLocaleString()} ml`, helper: "รวมทั้งระบบ", icon: Droplets, tone: "bg-blue-50 text-blue-600" },
-    { label: "AI scans", value: scans.toLocaleString(), helper: `${scanErrors} error`, icon: ScanLine, tone: "bg-violet-50 text-violet-600" },
+    { label: "ผู้ใช้ทั้งหมด", value: adminStats.users.toLocaleString(), helper: `${adminStats.admins} แอดมิน`, icon: UsersRound, tone: "bg-emerald-50 text-emerald-600" },
+    { label: "Active 7 วัน", value: adminStats.activeUsers7d.toLocaleString(), helper: "จาก meal/water/scan", icon: Activity, tone: "bg-sky-50 text-sky-600" },
+    { label: "มื้ออาหาร", value: adminStats.meals.toLocaleString(), helper: `วันนี้ ${adminStats.mealsToday} รายการ`, icon: Utensils, tone: "bg-amber-50 text-amber-600" },
+    { label: "น้ำวันนี้", value: `${Math.round(adminStats.waterTodayMl).toLocaleString()} ml`, helper: "รวมทั้งระบบ", icon: Droplets, tone: "bg-blue-50 text-blue-600" },
+    { label: "AI scans", value: adminStats.scans.toLocaleString(), helper: `${adminStats.scanErrors} error`, icon: ScanLine, tone: "bg-violet-50 text-violet-600" },
   ]
 
   return (
