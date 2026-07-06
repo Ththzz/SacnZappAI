@@ -69,7 +69,6 @@ type SuggestionPayload = {
   source?: string
   generatedAt?: string | null
   isStale?: boolean
-  refreshing?: boolean
   error?: string
 }
 
@@ -319,25 +318,6 @@ export default function HealthInsightClient() {
       applySuggestionPayload(payload)
       hasSuggestionData.current = true
       setSuggestionLoading(false)
-
-      if (payload.refreshing) {
-        setRefreshing(true)
-        const previousGeneratedAt = payload.generatedAt ?? null
-
-        for (let attempt = 0; attempt < 10; attempt += 1) {
-          await new Promise((resolve) => window.setTimeout(resolve, 1_500))
-          const pollResponse = await fetch("/api/meal-suggestions")
-          const pollPayload = (await pollResponse.json().catch(() => ({}))) as SuggestionPayload
-          if (!pollResponse.ok) continue
-
-          applySuggestionPayload(pollPayload)
-          const hasNewResult =
-            !pollPayload.refreshing &&
-            !pollPayload.isStale &&
-            (pollPayload.generatedAt ?? null) !== previousGeneratedAt
-          if (hasNewResult) break
-        }
-      }
     } catch (error) {
       setSuggestionError(error instanceof Error ? error.message : "โหลดคำแนะนำไม่สำเร็จ")
     } finally {
@@ -499,7 +479,6 @@ export default function HealthInsightClient() {
     setNotice(`เพิ่ม “${form.name}” ลงในประวัติมื้ออาหารแล้ว`)
     notifyMealHistoryUpdated()
     await loadInsightData()
-    void loadSuggestionData(true)
   }
 
   if (loading) return <InsightSkeleton />
@@ -684,7 +663,7 @@ function MealSuggestionsCard({
             <h2 className="text-base font-extrabold">มื้อถัดไปที่แนะนำ</h2>
           </div>
           <p className="mt-1 text-xs font-semibold text-neutral-400">
-            {generatedLabel ? `สร้างล่าสุด ${generatedLabel}${suggestionSource === "cache" ? " · ใช้ข้อมูลที่บันทึกไว้" : ""}` : "วิเคราะห์จากข้อมูลย้อนหลัง 7 วัน"}
+            {generatedLabel ? `สร้างล่าสุด ${generatedLabel}${suggestionSource.startsWith("cache") ? " · ใช้ข้อมูลที่บันทึกไว้" : ""}` : "ยังไม่มีคำแนะนำที่บันทึกไว้"}
           </p>
         </div>
         <button
@@ -703,14 +682,14 @@ function MealSuggestionsCard({
       </div>
 
       {(refreshing || isStale || error) && (
-        <div className={`mt-4 flex items-start gap-2 rounded-xl px-4 py-3 text-xs font-semibold ${refreshing || isStale ? "bg-amber-50 text-amber-700" : "bg-rose-50 text-rose-700"}`}>
+        <div className={`mt-4 flex items-start gap-2 rounded-xl px-4 py-3 text-xs font-semibold ${refreshing || (isStale && !error) ? "bg-amber-50 text-amber-700" : "bg-rose-50 text-rose-700"}`}>
           <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
           <span>
             {refreshing
-              ? "กำลังสร้างคำแนะนำด้วย AI เบื้องหลัง คุณยังใช้งานหน้าอื่นต่อได้"
-              : isStale
-                ? "กำลังแสดงคำแนะนำที่บันทึกไว้ก่อนหน้า กดสร้างคำแนะนำใหม่เมื่อต้องการอัปเดต"
-                : error}
+              ? "กำลังสร้างคำแนะนำใหม่ กรุณารอสักครู่"
+              : error
+                ? error
+                : "กำลังแสดงคำแนะนำที่บันทึกไว้ก่อนหน้า กดสร้างคำแนะนำใหม่เมื่อต้องการอัปเดต"}
           </span>
         </div>
       )}
@@ -725,7 +704,7 @@ function MealSuggestionsCard({
         )}
         {!loading && mealSuggestions.length === 0 && (
           <div className="rounded-xl bg-neutral-50 p-4 text-sm font-semibold text-neutral-500">
-            {suggestionSource === "missing-api-key" ? "ยังไม่ได้ตั้งค่า AI สำหรับสร้างคำแนะนำ" : "ยังไม่มีคำแนะนำสำหรับข้อมูลชุดนี้"}
+            ยังไม่มีคำแนะนำที่บันทึกไว้ กด “สร้างคำแนะนำใหม่” เมื่อต้องการให้ AI สร้างให้
           </div>
         )}
         {mealSuggestions.map((meal) => {

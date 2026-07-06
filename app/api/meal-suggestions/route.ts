@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto"
-import { after, NextResponse } from "next/server"
+import { NextResponse } from "next/server"
 
 import { requestAiChat } from "@/lib/ai/provider"
 import { requireUser } from "@/lib/auth"
@@ -23,15 +23,20 @@ type MealMacroTotals = {
   fat: number
 }
 
+type GeneratedSuggestionResult = {
+  suggestions: MealSuggestion[]
+  generatedAt: Date
+}
+
 export const maxDuration = 60
 const defaultMealSuggestionModel = "qwen/qwen3.6-flash"
 
 const bangkokTimeZone = "Asia/Bangkok"
 const dayMs = 24 * 60 * 60 * 1000
 const globalSuggestionJobs = globalThis as typeof globalThis & {
-  mealSuggestionJobs?: Map<string, Promise<void>>
+  mealSuggestionJobs?: Map<string, Promise<GeneratedSuggestionResult>>
 }
-const suggestionJobs = globalSuggestionJobs.mealSuggestionJobs ?? new Map<string, Promise<void>>()
+const suggestionJobs = globalSuggestionJobs.mealSuggestionJobs ?? new Map<string, Promise<GeneratedSuggestionResult>>()
 globalSuggestionJobs.mealSuggestionJobs = suggestionJobs
 
 function extractJson(content: string) {
@@ -119,66 +124,6 @@ function summarizeTotals(meals: Awaited<ReturnType<typeof loadRecentMeals>>): Me
   )
 }
 
-function buildFallbackSuggestions(input: {
-  meals: Awaited<ReturnType<typeof loadRecentMeals>>
-  dailyCalories: number | null
-}) {
-  const totals = summarizeTotals(input.meals)
-  const dayCount = Math.max(1, getBangkokSevenDayKeys().length)
-  const averageCalories = totals.calories / dayCount
-  const averageProtein = totals.protein / dayCount
-  const averageCarbs = totals.carbs / dayCount
-  const averageFat = totals.fat / dayCount
-  const calorieGap = input.dailyCalories ? input.dailyCalories - averageCalories : 0
-
-  const options: MealSuggestion[] = [
-    {
-      id: randomUUID(),
-      name: "ข้าวอกไก่ย่าง + ไข่ต้ม",
-      calories: 420,
-      protein: 34,
-      carbs: 42,
-      fat: 10,
-      reason: averageProtein < 75 ? "ช่วยเพิ่มโปรตีนจากค่าเฉลี่ยช่วง 7 วันที่ยังค่อนข้างต่ำ" : "เป็นมื้อสมดุล กินต่อได้ง่ายและคุมแคลอรี่ได้ดี",
-    },
-    {
-      id: randomUUID(),
-      name: "โยเกิร์ตกรีก + กล้วย + อัลมอนด์",
-      calories: 280,
-      protein: 18,
-      carbs: 30,
-      fat: 9,
-      reason: calorieGap < 250 ? "เหมาะเป็นมื้อเบาระหว่างวันเมื่อไม่อยากเพิ่มแคลอรี่มากเกินไป" : "เติมพลังงานแบบไม่หนักเกินและช่วยให้อิ่มนานขึ้น",
-    },
-    {
-      id: randomUUID(),
-      name: "สลัดทูน่า + มันหวาน",
-      calories: 360,
-      protein: 28,
-      carbs: 32,
-      fat: 11,
-      reason: averageFat > averageCarbs * 0.6 ? "ช่วยบาลานซ์มื้อถัดไปให้เบาขึ้นและได้ใยอาหารเพิ่ม" : "เป็นตัวเลือกที่สมดุลทั้งโปรตีน คาร์บ และไขมัน",
-    },
-    {
-      id: randomUUID(),
-      name: "ข้าวกล้องปลาแซลมอน + ผักลวก",
-      calories: 490,
-      protein: 32,
-      carbs: 44,
-      fat: 18,
-      reason: calorieGap > 350 ? "เหมาะเมื่อพลังงานเฉลี่ยช่วงนี้ยังต่ำกว่าเป้าหมายค่อนข้างมาก" : "ช่วยเติมพลังงานพร้อมไขมันดีและโปรตีนคุณภาพ",
-    },
-  ]
-
-  return options
-    .sort((first, second) => {
-      const firstDiff = Math.abs(first.calories - Math.max(280, calorieGap || first.calories))
-      const secondDiff = Math.abs(second.calories - Math.max(280, calorieGap || second.calories))
-      return firstDiff - secondDiff
-    })
-    .slice(0, 3)
-}
-
 async function createSuggestions(
   meals: Awaited<ReturnType<typeof loadRecentMeals>>,
   dailyCalories: number | null,
@@ -244,27 +189,12 @@ async function createAndCacheSuggestionsOnce(
         generatedAt,
       },
     })
+    return { suggestions, generatedAt }
   })().finally(() => {
     if (suggestionJobs.get(userId) === job) suggestionJobs.delete(userId)
   })
   suggestionJobs.set(userId, job)
   return job
-}
-
-function refreshSuggestionsInBackground(
-  userId: string,
-  meals: Awaited<ReturnType<typeof loadRecentMeals>>,
-  dailyCalories: number | null,
-) {
-  if (suggestionJobs.has(userId)) return
-
-  after(async () => {
-    try {
-      await createAndCacheSuggestionsOnce(userId, meals, dailyCalories)
-    } catch (error) {
-      console.error("Background meal suggestion refresh failed", error)
-    }
-  })
 }
 
 async function loadRecentMeals(userId: string) {
@@ -275,63 +205,66 @@ async function loadRecentMeals(userId: string) {
   })
 }
 
-async function handleSuggestions(forceRefresh: boolean) {
+export async function GET() {
   try {
     const user = await requireUser()
-    const [meals, cache, settingsRow] = await Promise.all([
-      loadRecentMeals(user.id),
-      prisma.mealSuggestionCache.findUnique({ where: { userId: user.id } }),
-      prisma.userSettings.findUnique({ where: { userId: user.id }, select: { settingsJson: true } }),
-    ])
-
-    if (meals.length === 0) {
-      return NextResponse.json({
-        suggestions: [],
-        source: "empty",
-        generatedAt: null,
-        isStale: false,
-      })
-    }
-
+    const cache = await prisma.mealSuggestionCache.findUnique({ where: { userId: user.id } })
     const cachedSuggestions = parseCachedSuggestions(cache?.suggestionsJson)
-    const cacheIsFresh = Boolean(cache && isSameBangkokDay(cache.generatedAt, new Date()))
-    if (!forceRefresh && cache && cachedSuggestions.length > 0 && cacheIsFresh) {
-      return NextResponse.json({
-        suggestions: cachedSuggestions,
-        source: "cache",
-        generatedAt: cache.generatedAt.toISOString(),
-        isStale: false,
-        refreshing: suggestionJobs.has(user.id),
-      })
-    }
-
-    const dailyCalories = readDailyCalories(settingsRow?.settingsJson)
-    const hasAiConfiguration = Boolean(process.env.QWEN_API_KEY)
-    const suggestions = cachedSuggestions.length > 0
-      ? cachedSuggestions
-      : buildFallbackSuggestions({ meals, dailyCalories })
-
-    if (hasAiConfiguration) {
-      refreshSuggestionsInBackground(user.id, meals, dailyCalories)
-    }
+    const cacheIsStale = Boolean(cache && !isSameBangkokDay(cache.generatedAt, new Date()))
 
     return NextResponse.json({
-      suggestions,
-      source: cachedSuggestions.length > 0 ? (cacheIsFresh ? "cache" : "cache-stale") : "fallback",
+      suggestions: cachedSuggestions,
+      source: cachedSuggestions.length > 0 ? (cacheIsStale ? "cache-stale" : "cache") : "empty",
       generatedAt: cache?.generatedAt.toISOString() ?? null,
-      isStale: cachedSuggestions.length > 0 && !cacheIsFresh,
-      refreshing: hasAiConfiguration,
-      error: hasAiConfiguration ? undefined : "ยังไม่ได้ตั้งค่า QWEN_API_KEY",
-    }, { status: hasAiConfiguration ? 202 : 200 })
+      isStale: cachedSuggestions.length > 0 && cacheIsStale,
+      refreshing: false,
+    })
   } catch (error) {
     return jsonError(error)
   }
 }
 
-export async function GET() {
-  return handleSuggestions(false)
-}
-
 export async function POST() {
-  return handleSuggestions(true)
+  try {
+    const user = await requireUser()
+    const [meals, settingsRow] = await Promise.all([
+      loadRecentMeals(user.id),
+      prisma.userSettings.findUnique({ where: { userId: user.id }, select: { settingsJson: true } }),
+    ])
+
+    if (meals.length === 0) {
+      return NextResponse.json(
+        { error: "ต้องมีข้อมูลมื้ออาหารในช่วง 7 วันก่อนสร้างคำแนะนำ" },
+        { status: 422 },
+      )
+    }
+
+    if (!process.env.QWEN_API_KEY) {
+      return NextResponse.json(
+        { error: "ยังไม่ได้ตั้งค่า QWEN_API_KEY สำหรับสร้างคำแนะนำ" },
+        { status: 503 },
+      )
+    }
+
+    const result = await createAndCacheSuggestionsOnce(
+      user.id,
+      meals,
+      readDailyCalories(settingsRow?.settingsJson),
+    )
+
+    return NextResponse.json({
+      suggestions: result.suggestions,
+      source: "generated",
+      generatedAt: result.generatedAt.toISOString(),
+      isStale: false,
+      refreshing: false,
+    })
+  } catch (error) {
+    if (error instanceof Response) return error
+    console.error("Meal suggestion generation failed", error)
+    return NextResponse.json(
+      { error: "สร้างคำแนะนำใหม่ไม่สำเร็จ กรุณาลองอีกครั้ง" },
+      { status: 502 },
+    )
+  }
 }
