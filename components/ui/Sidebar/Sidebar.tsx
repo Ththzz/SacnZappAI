@@ -92,6 +92,7 @@ const Sidebar = ({ user }: { user?: UserSummary | null }) => {
               <Link
                 key={item.link}
                 href={item.link}
+                replace
                 prefetch={false}
                 aria-current={pathname === item.link ? 'page' : undefined}
                 className={`flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors duration-100 ${
